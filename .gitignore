@@ -1,0 +1,10 @@
+node_modules
+dist
+.turbo
+.astro
+.vercel
+.wrangler
+*.log
+.DS_Store
+.env
+.dev.vars
