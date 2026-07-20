@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { type HostView } from "@chowka/shared";
 import { useCountdown, useGameSocket } from "../lib/useGameSocket";
 import { useAudio, usePhaseSound } from "../lib/useAudio";
@@ -30,13 +30,13 @@ function TurnBanner({ view }: { view: HostView }) {
   );
 }
 
-function SidePanel({ view }: { view: HostView }) {
+function SidePanel({ view, settleDice }: { view: HostView; settleDice: boolean }) {
   return (
     <div className="space-y-6">
       {(view.phase === "roll" || view.phase === "move" || view.phase === "resolution") && (
         <PhaseShell tone={view.phase === "move" ? "success" : "calm"} className="text-center">
           {view.currentRoll != null ? (
-            <ShellDice value={view.currentRoll} size="lg" animate={view.phase === "move"} />
+            <ShellDice value={view.currentRoll} size="lg" animate={settleDice || view.phase === "move"} />
           ) : (
             <div>
               <ShellDice value={null} size="lg" />
@@ -71,8 +71,15 @@ export function HostScreen({ code }: { code: string }) {
   const { muted, toggleMute, play } = useAudio();
   const hostView = view?.role === "host" ? view : null;
   const seconds = useCountdown(hostView?.phaseEndsAt ?? null);
+  const [settleDice, setSettleDice] = useState(false);
 
   usePhaseSound(hostView?.phase, play);
+
+  useEffect(() => {
+    if (!settleDice) return;
+    const t = window.setTimeout(() => setSettleDice(false), 550);
+    return () => window.clearTimeout(t);
+  }, [settleDice]);
 
   const processedEvents = useRef(0);
   useEffect(() => {
@@ -82,6 +89,7 @@ export function HostScreen({ code }: { code: string }) {
       switch (msg.event.kind) {
         case "rolled":
           play("roll");
+          setSettleDice(true);
           break;
         case "moved":
           play("move");
@@ -173,7 +181,7 @@ export function HostScreen({ code }: { code: string }) {
                 )}
               </div>
             </section>
-            <SidePanel view={hostView} />
+            <SidePanel view={hostView} settleDice={settleDice} />
           </div>
         </div>
       )}

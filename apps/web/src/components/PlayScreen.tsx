@@ -54,8 +54,26 @@ export function PlayScreen({
   const { muted, toggleMute, play } = useAudio();
   const playerView = view?.role === "player" ? view : null;
   const seconds = useCountdown(playerView?.phaseEndsAt ?? null);
+  const [isRolling, setIsRolling] = useState(false);
+  const [settleDice, setSettleDice] = useState(false);
+  const threwSelf = useRef(false);
 
   usePhaseSound(playerView?.phase, play);
+
+  useEffect(() => {
+    if (!settleDice) return;
+    const t = window.setTimeout(() => setSettleDice(false), 550);
+    return () => window.clearTimeout(t);
+  }, [settleDice]);
+
+  // Clear tumble if we leave roll/move somehow.
+  useEffect(() => {
+    const phase = playerView?.phase;
+    if (phase && phase !== "roll" && phase !== "move") {
+      setIsRolling(false);
+      threwSelf.current = false;
+    }
+  }, [playerView?.phase]);
 
   const processedEvents = useRef(0);
   useEffect(() => {
@@ -64,7 +82,15 @@ export function PlayScreen({
       if (!msg || msg.type !== "event") continue;
       switch (msg.event.kind) {
         case "rolled":
-          play("roll");
+          if (threwSelf.current) {
+            threwSelf.current = false;
+            setIsRolling(false);
+            setSettleDice(true);
+            play("rollLand");
+          } else {
+            play("roll");
+            setSettleDice(true);
+          }
           break;
         case "moved":
           play("move");
@@ -109,11 +135,11 @@ export function PlayScreen({
   }
 
   return (
-    <main className="mx-auto flex min-h-dvh max-w-md flex-col px-4 py-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-[max(1.25rem,env(safe-area-inset-top))]">
-      <header className="flex items-center justify-between gap-3">
+    <main className="mx-auto flex h-dvh max-h-dvh max-w-md flex-col overflow-hidden px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-[max(0.75rem,env(safe-area-inset-top))] sm:py-5">
+      <header className="flex shrink-0 items-center justify-between gap-3">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-wider text-o2">Room</p>
-          <p className="font-display text-2xl font-bold tracking-wide text-surface">{code}</p>
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-o2 sm:text-xs">Room</p>
+          <p className="font-display text-xl font-bold tracking-wide text-surface sm:text-2xl">{code}</p>
         </div>
         <div className="flex items-center gap-2">
           {playerView?.phase === "lobby" && rulesOk && (
@@ -146,16 +172,19 @@ export function PlayScreen({
       )}
 
       {showRules ? (
-        <div className="mt-6 flex flex-1 flex-col">
+        <div className="mt-4 flex min-h-0 flex-1 flex-col overflow-y-auto">
           <RulesScreen onDone={acceptRules} onBack={rulesOk ? () => setShowRules(false) : undefined} />
         </div>
       ) : !playerView ? (
         <p className="mt-10 animate-pulseGlow text-center text-surface/70">Linking to room…</p>
       ) : (
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <PlayerBody
           view={playerView}
           seconds={seconds}
           rulesOk={rulesOk}
+          isRolling={isRolling}
+          settleDice={settleDice}
           onSetColor={(c) => {
             play("tap");
             send({ type: "setColor", color: c });
@@ -169,7 +198,10 @@ export function PlayScreen({
             send({ type: "startGame" });
           }}
           onThrow={() => {
-            play("tap");
+            threwSelf.current = true;
+            setIsRolling(true);
+            setSettleDice(false);
+            play("roll");
             send({ type: "throwShells" });
             if (typeof navigator !== "undefined" && navigator.vibrate) navigator.vibrate(30);
           }}
@@ -200,6 +232,7 @@ export function PlayScreen({
           }}
           onShowRules={() => setShowRules(true)}
         />
+        </div>
       )}
     </main>
   );
@@ -209,6 +242,8 @@ function PlayerBody({
   view,
   seconds,
   rulesOk,
+  isRolling,
+  settleDice,
   onSetColor,
   onReady,
   onStart,
@@ -224,6 +259,8 @@ function PlayerBody({
   view: PlayerView;
   seconds: number;
   rulesOk: boolean;
+  isRolling: boolean;
+  settleDice: boolean;
   onSetColor: (c: Color) => void;
   onReady: (ready: boolean) => void;
   onStart: () => void;
@@ -254,7 +291,7 @@ function PlayerBody({
     const allowedOpposite = otherColor ? oppositeColor(otherColor) : null;
 
     return (
-      <div className="mt-6 animate-fadeIn space-y-5">
+      <div className="mt-4 min-h-0 flex-1 space-y-5 overflow-y-auto animate-fadeIn">
         <PhaseShell>
           <p className="text-center text-sm font-semibold uppercase tracking-wider text-o2">
             Share this code
@@ -351,7 +388,7 @@ function PlayerBody({
 
   if (view.phase === "endgame" && view.gameOver) {
     return (
-      <div className="mt-6">
+      <div className="mt-4 min-h-0 flex-1 overflow-y-auto">
         <Scorecard
           gameOver={view.gameOver}
           myPlayerId={view.myPlayerId}
@@ -365,9 +402,9 @@ function PlayerBody({
     );
   }
 
-  // In-game phases: roll / move / resolution
+  // In-game phases: roll / move / resolution — fit in one phone viewport.
   return (
-    <div className="relative mt-4 space-y-4">
+    <div className="relative mt-2 flex min-h-0 flex-1 flex-col gap-2">
       <StatusStrip
         turnName={activeName}
         isMyTurn={view.isMyTurn}
@@ -375,121 +412,161 @@ function PlayerBody({
         seconds={view.isMyTurn && !view.paused && seconds > 0 ? seconds : null}
       />
 
-      <Board
-        players={view.players}
-        activePlayerId={view.activePlayerId}
-        orientFor={view.myColor}
-      />
+      <div className="mx-auto w-full max-w-[min(100%,48dvh)] shrink">
+        <Board
+          players={view.players}
+          activePlayerId={view.activePlayerId}
+          orientFor={view.myColor}
+          className="!p-2 sm:!p-3"
+        />
+      </div>
 
-      {view.phase === "roll" && (
-        <div className="space-y-4">
-          {view.isMyTurn ? (
-            <>
-              <Instruction title="Your turn" subtitle="Throw the shells to roll." />
-              <PrimaryButton className="animate-pulseGlow" onClick={onThrow}>
-                Throw Shells
-              </PrimaryButton>
-            </>
-          ) : (
-            <Instruction title={`${activeName}'s turn`} subtitle="Waiting for their throw…" />
-          )}
-        </div>
-      )}
-
-      {view.phase === "move" && (
-        <div className="space-y-4">
-          {view.isMyTurn ? (
-            <>
-              <PhaseShell>
-                <ShellDice value={view.currentRoll} />
-              </PhaseShell>
-              {view.myValidMoves.length > 0 ? (
-                <>
-                  <p className="text-center text-sm text-surface/70">Choose a pawn to move</p>
-                  <div className="grid grid-cols-2 gap-3">
-                    {(me?.pawns ?? []).map((pos, i) => {
-                      const valid = view.myValidMoves.includes(i);
-                      const theme = me?.color ? COLOR_THEME[me.color] : null;
-                      return (
-                        <button
-                          key={i}
-                          type="button"
-                          disabled={!valid}
-                          onClick={() => onMove(i)}
-                          className={`flex min-h-16 flex-col items-center justify-center rounded-2xl border-2 px-3 py-3 font-display active:scale-[0.98] disabled:opacity-30 ${
-                            valid ? "border-surface/60 bg-surface/15 text-surface" : "border-surface/20 bg-surface/5 text-surface/50"
-                          }`}
-                        >
-                          <span className="flex items-center gap-2 text-base font-bold">
-                            <span
-                              className="inline-block h-3.5 w-3.5 rounded-full ring-2 ring-white/40"
-                              style={{ background: theme?.hex ?? "#6B8499" }}
-                            />
-                            Pawn {i + 1}
-                          </span>
-                          <span className="text-xs opacity-75">{pawnLabel(pos)}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </>
+      <div className="flex min-h-0 flex-1 flex-col justify-end gap-2">
+        {view.phase === "roll" && (
+          <div className="space-y-2">
+            {(isRolling || view.isMyTurn) && (
+              <div className="flex justify-center">
+                <ShellDice
+                  value={isRolling ? null : view.currentRoll}
+                  size="sm"
+                  rolling={isRolling}
+                  animate={settleDice}
+                />
+              </div>
+            )}
+            {view.isMyTurn ? (
+              isRolling ? (
+                <Instruction compact title="Throwing…" subtitle="Shells are tumbling" />
               ) : (
                 <>
-                  <Instruction title="No valid moves" subtitle="Nothing you can move with this roll." tone="talk" />
-                  <PrimaryButton variant="ink" onClick={onSkip}>
-                    Skip Turn
+                  <Instruction compact title="Your turn" subtitle="Throw the shells to roll." />
+                  <PrimaryButton className="animate-pulseGlow !min-h-12 !py-2.5 !text-base" onClick={onThrow}>
+                    Throw Shells
                   </PrimaryButton>
                 </>
-              )}
-            </>
-          ) : (
-            <Instruction title={`${activeName} is moving`} subtitle={`Rolled a ${view.currentRoll ?? "?"}.`} />
-          )}
-        </div>
-      )}
-
-      {view.phase === "resolution" && (
-        <div className="space-y-3">
-          <Instruction title="…" subtitle="Resolving move" />
-          <Pockets players={view.players} />
-        </div>
-      )}
-
-      {/* Global controls: pause the game for everyone or leave for good. */}
-      <div className="flex items-center gap-3 pt-1">
-        <button
-          type="button"
-          onClick={view.paused ? onResume : onPause}
-          className="flex-1 rounded-2xl bg-surface/15 px-3 py-3 font-display text-sm font-semibold text-surface transition active:scale-[0.98]"
-        >
-          {view.paused ? "Resume" : "Pause"}
-        </button>
-        {confirmExit ? (
-          <div className="flex flex-1 items-center gap-2">
-            <button
-              type="button"
-              onClick={onExit}
-              className="flex-1 rounded-2xl bg-danger/80 px-3 py-3 font-display text-sm font-semibold text-white transition active:scale-[0.98]"
-            >
-              Leave for good
-            </button>
-            <button
-              type="button"
-              onClick={() => setConfirmExit(false)}
-              className="rounded-2xl bg-surface/15 px-3 py-3 font-display text-sm font-semibold text-surface"
-            >
-              Cancel
-            </button>
+              )
+            ) : (
+              <Instruction compact title={`${activeName}'s turn`} subtitle="Waiting for their throw…" />
+            )}
           </div>
-        ) : (
+        )}
+
+        {view.phase === "move" && (
+          <div className="space-y-2">
+            {view.isMyTurn ? (
+              <>
+                <div className="flex justify-center">
+                  <ShellDice
+                    value={view.currentRoll}
+                    size="sm"
+                    rolling={false}
+                    animate={settleDice}
+                  />
+                </div>
+                {view.myValidMoves.length > 0 ? (
+                  <>
+                    <p className="text-center text-xs text-surface/70 sm:text-sm">Choose a pawn</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      {(me?.pawns ?? []).map((pos, i) => {
+                        const valid = view.myValidMoves.includes(i);
+                        const theme = me?.color ? COLOR_THEME[me.color] : null;
+                        return (
+                          <button
+                            key={i}
+                            type="button"
+                            disabled={!valid}
+                            onClick={() => onMove(i)}
+                            className={`flex min-h-12 flex-col items-center justify-center rounded-xl border-2 px-2 py-2 font-display active:scale-[0.98] disabled:opacity-30 sm:min-h-14 sm:rounded-2xl sm:px-3 ${
+                              valid
+                                ? "border-surface/60 bg-surface/15 text-surface"
+                                : "border-surface/20 bg-surface/5 text-surface/50"
+                            }`}
+                          >
+                            <span className="flex items-center gap-1.5 text-sm font-bold sm:text-base">
+                              <span
+                                className="inline-block h-3 w-3 rounded-full ring-2 ring-white/40"
+                                style={{ background: theme?.hex ?? "#6B8499" }}
+                              />
+                              Pawn {i + 1}
+                            </span>
+                            <span className="text-[10px] opacity-75 sm:text-xs">{pawnLabel(pos)}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <Instruction
+                      compact
+                      title="No valid moves"
+                      subtitle="Nothing you can move with this roll."
+                      tone="talk"
+                    />
+                    <PrimaryButton variant="ink" className="!min-h-12 !py-2.5 !text-base" onClick={onSkip}>
+                      Skip Turn
+                    </PrimaryButton>
+                  </>
+                )}
+              </>
+            ) : (
+              <>
+                <div className="flex justify-center">
+                  <ShellDice value={view.currentRoll} size="sm" animate={settleDice} />
+                </div>
+                <Instruction
+                  compact
+                  title={`${activeName} is moving`}
+                  subtitle={`Rolled a ${view.currentRoll ?? "?"}.`}
+                />
+              </>
+            )}
+          </div>
+        )}
+
+        {view.phase === "resolution" && (
+          <div className="space-y-2">
+            <Instruction compact title="…" subtitle="Resolving move" />
+            <Pockets players={view.players} />
+          </div>
+        )}
+
+        {/* Global controls */}
+        <div className="flex shrink-0 items-center gap-2 pt-0.5">
           <button
             type="button"
-            onClick={() => setConfirmExit(true)}
-            className="flex-1 rounded-2xl bg-danger/20 px-3 py-3 font-display text-sm font-semibold text-danger-soft transition active:scale-[0.98]"
+            onClick={view.paused ? onResume : onPause}
+            className="flex-1 rounded-xl bg-surface/15 px-3 py-2 font-display text-xs font-semibold text-surface transition active:scale-[0.98] sm:rounded-2xl sm:py-2.5 sm:text-sm"
           >
-            Exit Game
+            {view.paused ? "Resume" : "Pause"}
           </button>
-        )}
+          {confirmExit ? (
+            <div className="flex flex-1 items-center gap-2">
+              <button
+                type="button"
+                onClick={onExit}
+                className="flex-1 rounded-xl bg-danger/80 px-3 py-2 font-display text-xs font-semibold text-white transition active:scale-[0.98] sm:rounded-2xl sm:py-2.5 sm:text-sm"
+              >
+                Leave for good
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmExit(false)}
+                className="rounded-xl bg-surface/15 px-3 py-2 font-display text-xs font-semibold text-surface sm:rounded-2xl sm:py-2.5 sm:text-sm"
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setConfirmExit(true)}
+              className="flex-1 rounded-xl bg-danger/20 px-3 py-2 font-display text-xs font-semibold text-danger-soft transition active:scale-[0.98] sm:rounded-2xl sm:py-2.5 sm:text-sm"
+            >
+              Exit Game
+            </button>
+          )}
+        </div>
       </div>
 
       {view.paused && (

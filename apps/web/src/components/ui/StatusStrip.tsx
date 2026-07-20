@@ -10,10 +10,10 @@ export function StatusStrip({
   seconds?: number | null;
 }) {
   return (
-    <div className="flex flex-wrap items-center gap-2 rounded-2xl bg-surface/15 px-3 py-2 text-sm text-surface backdrop-blur-sm">
+    <div className="flex flex-wrap items-center gap-1.5 rounded-xl bg-surface/15 px-2.5 py-1.5 text-xs text-surface backdrop-blur-sm sm:gap-2 sm:rounded-2xl sm:px-3 sm:py-2 sm:text-sm">
       {turnName != null && (
         <span
-          className={`rounded-full px-3 py-1 font-display font-semibold ${
+          className={`rounded-full px-2.5 py-0.5 font-display font-semibold sm:px-3 sm:py-1 ${
             isMyTurn ? "bg-o2 text-ink" : "bg-surface/25 text-surface"
           }`}
         >
@@ -21,12 +21,12 @@ export function StatusStrip({
         </span>
       )}
       {roll != null && (
-        <span className="rounded-full bg-warn px-3 py-1 font-display font-semibold tabular-nums text-ink">
+        <span className="rounded-full bg-warn px-2.5 py-0.5 font-display font-semibold tabular-nums text-ink sm:px-3 sm:py-1">
           Roll {roll}
         </span>
       )}
       {seconds != null && seconds > 0 && (
-        <span className="rounded-full bg-surface px-3 py-1 font-display font-semibold tabular-nums text-ink">
+        <span className="rounded-full bg-surface px-2.5 py-0.5 font-display font-semibold tabular-nums text-ink sm:px-3 sm:py-1">
           {seconds}s
         </span>
       )}

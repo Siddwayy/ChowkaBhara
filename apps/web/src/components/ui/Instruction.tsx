@@ -2,10 +2,13 @@ export function Instruction({
   title,
   subtitle,
   tone = "calm",
+  compact = false,
 }: {
   title: string;
   subtitle?: string;
   tone?: "calm" | "talk" | "danger" | "success";
+  /** Smaller titles for tight phone viewports. */
+  compact?: boolean;
 }) {
   const titleColor =
     tone === "danger"
@@ -18,11 +21,21 @@ export function Instruction({
 
   return (
     <div className="animate-fadeIn text-center">
-      <h2 className={`font-display text-3xl font-bold leading-tight sm:text-4xl ${titleColor}`}>
+      <h2
+        className={`font-display font-bold leading-tight ${titleColor} ${
+          compact ? "text-xl sm:text-3xl" : "text-3xl sm:text-4xl"
+        }`}
+      >
         {title}
       </h2>
       {subtitle && (
-        <p className="mt-2 text-base leading-relaxed text-surface/80 sm:text-lg">{subtitle}</p>
+        <p
+          className={`mt-1 leading-relaxed text-surface/80 sm:mt-2 ${
+            compact ? "text-sm sm:text-base" : "text-base sm:text-lg"
+          }`}
+        >
+          {subtitle}
+        </p>
       )}
     </div>
   );

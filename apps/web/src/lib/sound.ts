@@ -11,6 +11,7 @@ export type SoundName =
   | "unready"
   | "start"
   | "roll"
+  | "rollLand"
   | "move"
   | "capture"
   | "home"
@@ -128,12 +129,22 @@ const RECIPES: Record<SoundName, () => ToneSpec[]> = {
     { freq: 523, type: "sawtooth", delay: 0.1, duration: 0.12, gain: 0.22 },
     { freq: 784, type: "sawtooth", delay: 0.2, duration: 0.18, gain: 0.24 },
   ],
-  // Cowrie shells tumbling — a short burst of noisy-ish clicks.
+  // Cowrie shells tumbling — dense staggered clicks (~0.55s).
   roll: () => [
-    { freq: 300, type: "square", duration: 0.05, gain: 0.12 },
-    { freq: 420, type: "square", delay: 0.06, duration: 0.05, gain: 0.12 },
-    { freq: 260, type: "square", delay: 0.12, duration: 0.05, gain: 0.12 },
-    { freq: 500, type: "triangle", delay: 0.2, duration: 0.14, gain: 0.18 },
+    { freq: 280, type: "square", duration: 0.04, gain: 0.11 },
+    { freq: 410, type: "square", delay: 0.05, duration: 0.04, gain: 0.12 },
+    { freq: 240, type: "square", delay: 0.1, duration: 0.04, gain: 0.1 },
+    { freq: 480, type: "triangle", delay: 0.15, duration: 0.05, gain: 0.13 },
+    { freq: 320, type: "square", delay: 0.22, duration: 0.04, gain: 0.11 },
+    { freq: 520, type: "square", delay: 0.28, duration: 0.04, gain: 0.12 },
+    { freq: 260, type: "triangle", delay: 0.34, duration: 0.05, gain: 0.11 },
+    { freq: 390, type: "square", delay: 0.4, duration: 0.04, gain: 0.12 },
+    { freq: 450, type: "triangle", delay: 0.46, duration: 0.08, gain: 0.14 },
+  ],
+  // Shells settle / land after the tumble.
+  rollLand: () => [
+    { freq: 360, type: "triangle", duration: 0.06, gain: 0.16 },
+    { freq: 540, type: "triangle", delay: 0.05, duration: 0.1, gain: 0.2 },
   ],
   move: () => [
     { freq: 520, freqEnd: 700, type: "triangle", duration: 0.14, gain: 0.18 },
