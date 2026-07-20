@@ -1,7 +1,6 @@
 import {
   BONUS_ROLLS,
   CENTER_INDEX,
-  INNER_RING_START,
   ROLL_VALUES,
   ROOM_CODE_ALPHABET,
   ROOM_CODE_LENGTH,
@@ -16,8 +15,11 @@ const OPPOSITE: Record<Color, Color> = {
   yellow: "blue",
 };
 
-/** Path indices that are safe for every color (homes + center). */
-const SAFE_PATH_INDICES = new Set([0, 4, 8, 12, CENTER_INDEX]);
+/**
+ * Path indices that are safe for every color (rotationally symmetric on the
+ * shared track): 4 outer entries, 4 middle-ring corners, and center.
+ */
+const SAFE_PATH_INDICES = new Set([0, 6, 12, 18, 27, 31, 35, 39, CENTER_INDEX]);
 
 export function oppositeColor(color: Color): Color {
   return OPPOSITE[color];
@@ -59,7 +61,7 @@ export function destForPawn(pos: number, roll: number): number {
 
 /**
  * True if another of this player's pawns already occupies `dest`.
- * Safe cells (path indices 0/4/8/12/24) may stack; every other cell is exclusive.
+ * Safe cells may stack; every other cell is exclusive.
  */
 export function wouldLandOnOwnPawn(
   pawns: number[],
@@ -77,23 +79,20 @@ export function wouldLandOnOwnPawn(
 /**
  * Is moving this pawn by `roll` legal?
  *  - finished pawn (on center) cannot move
- *  - center needs an exact landing; overshooting past 24 is illegal
- *  - cannot enter the inner ring (index >= 16) until a capture has been made
+ *  - center needs an exact landing; overshooting past center is illegal
  *  - cannot land on a cell already occupied by your own pawn (except safe cells)
  */
 export function isMoveValid(
   pos: number,
   roll: number,
-  hasCaptured: boolean = false,
+  _hasCaptured: boolean = false,
   pawns?: number[],
   pawnIndex?: number,
 ): boolean {
   if (!isValidRoll(roll)) return false;
-  const from = effectivePos(pos);
-  if (from === CENTER_INDEX) return false;
-  const dest = from + roll;
+  if (pos === CENTER_INDEX) return false;
+  const dest = destForPawn(pos, roll);
   if (dest > CENTER_INDEX) return false;
-  if (!hasCaptured && dest >= INNER_RING_START) return false;
   if (pawns && pawnIndex != null && wouldLandOnOwnPawn(pawns, pawnIndex, dest)) {
     return false;
   }

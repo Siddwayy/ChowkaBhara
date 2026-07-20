@@ -61,7 +61,7 @@ ALLOWED_ORIGINS = "http://localhost:4321"
 2. Everyone picks a color (Red, Blue, Green, Yellow), reads the rules, and taps **Ready**.
 3. Host taps **Start**. On your turn: **Throw Shells**, then tap a pawn to move it.
 4. Land on an opponent (off a starred safe square) to send it home and earn a bonus roll. Roll a 4 or 8 for a bonus roll too.
-5. You must capture once before entering the inner ring; an exact roll lands the center. First to bring all 4 pawns home wins.
+5. An exact roll lands the center. First to bring all 4 pawns home wins.
 
 ## Deploy checklist (both done in-browser)
 
@@ -84,7 +84,7 @@ ALLOWED_ORIGINS = "http://localhost:4321"
 ## Game model (server-authoritative)
 
 - One Durable Object per room code; all rules run there. Clients only send intents.
-- Board is a 5×5 grid. Each pawn's position is an integer: `-1` = base pocket, `0..24` = track index, `24` = center. Movement is `newPos = pos + roll`.
-- `packages/shared/src/paths.ts` holds the canonical 25-step spiral for Red and rotates it 90° per color, so all four share one track and captures resolve by absolute cell.
-- The 5 safe squares (4 edge-middle home bases + center) can never be captured on and allow stacking.
+- Board is a 7×7 grid. Each pawn's position is an integer: `-1` = base pocket, `0..48` = track index, `48` = center. Movement is `newPos = pos + roll`.
+- `packages/shared/src/paths.ts` holds the canonical spiral for Red and rotates it 90° per color, so all four share one track and captures resolve by absolute cell.
+- Safe squares (edge homes, inner-corner Xs, and center) can never be captured on and allow stacking.
 - Phases: `lobby → roll → move → resolution → (roll | next turn) → … → endgame`, driven by Durable Object alarms with a per-turn timeout that auto-acts so an idle player never stalls the table.

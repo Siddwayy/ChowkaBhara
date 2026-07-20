@@ -7,6 +7,7 @@ import {
   type Color,
 } from "@chowka/shared";
 import { COLOR_THEME } from "../lib/colors";
+import { zoneBaseFill } from "../lib/boardZones";
 import { PrimaryButton, ShellIcon } from "./ui";
 
 const GAME_LOOP = [
@@ -20,7 +21,7 @@ const GAME_LOOP = [
   },
   {
     title: "Capture",
-    body: "Land on an opponent (off a safe X) → they return home; you roll again. You must capture once before entering the inner ring.",
+    body: "Land on an opponent (off a safe X) → they return home; you roll again.",
   },
   {
     title: "Bonus",
@@ -33,12 +34,13 @@ const GAME_LOOP = [
 ];
 
 const SHELL_SCORES = [1, 2, 3, 4, 8] as const;
+const CENTER_RC = (BOARD_SIZE - 1) / 2;
 
 function cellKey(r: number, c: number): string {
   return `${r}-${c}`;
 }
 
-/** Static 5×5 board with red's spiral path — teaching diagram only. */
+/** Static 7×7 board with red's spiral path — teaching diagram only. */
 function RulesPathBoard() {
   const route = PATHS.red;
   const theme = COLOR_THEME.red;
@@ -79,26 +81,26 @@ function RulesPathBoard() {
       >
         <div className="relative aspect-square w-full overflow-hidden rounded-sm bg-[#e8d4b0]">
           <div
-            className="absolute inset-0 grid grid-cols-5 grid-rows-5"
-            style={{ gap: 0, border: "2.5px solid #1a1208" }}
+            className="absolute inset-0 grid"
+            style={{
+              gap: 0,
+              border: "2.5px solid #1a1208",
+              gridTemplateColumns: `repeat(${BOARD_SIZE}, 1fr)`,
+              gridTemplateRows: `repeat(${BOARD_SIZE}, 1fr)`,
+            }}
           >
             {cells.map(({ r, c }) => {
               const safe = isSafeCell([r, c]);
-              const isCenter = r === 2 && c === 2;
+              const isCenter = r === CENTER_RC && c === CENTER_RC;
               const homeColor = homeByCell.get(cellKey(r, c)) ?? null;
               const homeTheme = homeColor ? COLOR_THEME[homeColor] : null;
 
               let crossColor = "#1a1208";
               if (isCenter) crossColor = "#B8860B";
               else if (homeTheme) crossColor = homeTheme.hex;
-              else if (safe) crossColor = "#3d2a12";
+              else if (safe) crossColor = "#f0e0c4";
 
-              let bg = "linear-gradient(180deg, #f0e0c4 0%, #e2cb9e 100%)";
-              if (isCenter) {
-                bg = "linear-gradient(160deg, #FFE9A8 0%, #F5C842 45%, #D4A017 100%)";
-              } else if (homeTheme) {
-                bg = `linear-gradient(180deg, ${homeTheme.hex}33 0%, ${homeTheme.hex}22 100%), linear-gradient(180deg, #f0e0c4 0%, #e2cb9e 100%)`;
-              }
+              const bg = zoneBaseFill(r, c, safe, isCenter);
 
               return (
                 <div

@@ -7,7 +7,9 @@ import {
   PAWNS_PER_PLAYER,
   RECONNECT_GRACE_MS,
   RESOLUTION_MS,
-  TURN_TIMEOUT_MS,
+  ROLL_TIMEOUT_MS,
+  MOVE_TIMEOUT_MS,
+  SKIP_TIMEOUT_MS,
   ClientMessageSchema,
   coordFor,
   computeValidMoves,
@@ -397,8 +399,10 @@ export class RoomDurableObject implements DurableObject {
   /** Restart the timer for the current phase (used when resuming from pause). */
   private async restartPhaseTimer(): Promise<void> {
     let durationMs: number | null = null;
-    if (this.room.phase === "roll" || this.room.phase === "move") {
-      durationMs = TURN_TIMEOUT_MS;
+    if (this.room.phase === "roll") {
+      durationMs = ROLL_TIMEOUT_MS;
+    } else if (this.room.phase === "move") {
+      durationMs = this.moveTimeoutMs();
     } else if (this.room.phase === "resolution") {
       durationMs = RESOLUTION_MS;
     }
@@ -409,6 +413,19 @@ export class RoomDurableObject implements DurableObject {
       this.room.phaseEndsAt = null;
       await this.state.storage.deleteAlarm();
     }
+  }
+
+  /** 45s when there are legal moves; 10s when the player can only skip. */
+  private moveTimeoutMs(): number {
+    const active = this.getPlayer(this.room.activePlayerId);
+    if (!active || this.room.currentRoll === null) return MOVE_TIMEOUT_MS;
+    const valid = computeValidMoves(
+      active.pawns,
+      this.room.currentRoll,
+      active.hasCaptured,
+      active.color ?? undefined,
+    );
+    return valid.length > 0 ? MOVE_TIMEOUT_MS : SKIP_TIMEOUT_MS;
   }
 
   // ----------------------------------------------------------- game loop ---
@@ -452,7 +469,7 @@ export class RoomDurableObject implements DurableObject {
     this.room.currentRoll = null;
     this.room.lastMove = null;
     this.room.bonusPending = false;
-    await this.setPhase("roll", TURN_TIMEOUT_MS);
+    await this.setPhase("roll", ROLL_TIMEOUT_MS);
   }
 
   private async doRoll(): Promise<void> {
@@ -474,7 +491,7 @@ export class RoomDurableObject implements DurableObject {
       playerId: active.id,
       value: this.room.currentRoll,
     });
-    await this.setPhase("move", TURN_TIMEOUT_MS);
+    await this.setPhase("move", this.moveTimeoutMs());
   }
 
   private async applyMove(playerId: string, pawnIndex: number): Promise<void> {
@@ -678,8 +695,12 @@ export class RoomDurableObject implements DurableObject {
           active.hasCaptured,
           active.color ?? undefined,
         );
-        if (valid.length > 0) await this.applyMove(active.id, valid[0]!);
-        else await this.doSkip(active.id);
+        if (valid.length > 0) {
+          const pick = valid[Math.floor(Math.random() * valid.length)]!;
+          await this.applyMove(active.id, pick);
+        } else {
+          await this.doSkip(active.id);
+        }
         break;
       }
       case "resolution":

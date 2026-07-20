@@ -27,7 +27,7 @@ export const PlayerPublicSchema = z.object({
   color: ColorSchema.nullable(),
   shape: PawnShapeSchema.nullable().optional().default(null),
   ready: z.boolean().optional().default(false),
-  /** Pawn track positions, length 4: -1 pocket .. 24 center. */
+  /** Pawn track positions, length 4: -1 pocket .. 48 center. */
   pawns: z.array(z.number()),
   hasCaptured: z.boolean().optional().default(false),
   finishedCount: z.number().optional().default(0),

@@ -2,8 +2,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   COLORS,
   PAWN_SHAPES,
+  coordFor,
+  destForPawn,
   oppositeColor,
   type Color,
+  type Coord,
   type PawnShape,
   type PlayerView,
 } from "@chowka/shared";
@@ -18,7 +21,6 @@ import { acknowledgeRules, hasAcknowledgedRules, RulesScreen } from "./RulesScre
 import { Scorecard } from "./Scorecard";
 import {
   CrewList,
-  Instruction,
   PhaseShell,
   PrimaryButton,
   ShellDice,
@@ -61,11 +63,13 @@ export function PlayScreen({
     return () => window.clearTimeout(t);
   }, [settleDice]);
 
-  // Clear tumble if we leave roll/move somehow.
+  // Clear tumble once we've left the throw-in-progress window.
   useEffect(() => {
     const phase = playerView?.phase;
-    if (phase && phase !== "roll" && phase !== "move") {
+    if (phase === "move" || phase === "resolution" || phase === "endgame" || phase === "lobby") {
       setIsRolling(false);
+    }
+    if (phase && phase !== "roll") {
       threwSelf.current = false;
     }
   }, [playerView?.phase]);
@@ -76,17 +80,14 @@ export function PlayScreen({
       const msg = events[i];
       if (!msg || msg.type !== "event") continue;
       switch (msg.event.kind) {
-        case "rolled":
-          if (threwSelf.current) {
-            threwSelf.current = false;
-            setIsRolling(false);
-            setSettleDice(true);
-            play("rollLand");
-          } else {
-            play("roll");
-            setSettleDice(true);
-          }
+        case "rolled": {
+          const selfThrow = threwSelf.current;
+          threwSelf.current = false;
+          setIsRolling(false);
+          setSettleDice(true);
+          play(selfThrow ? "rollLand" : "roll");
           break;
+        }
         case "moved":
           play("move");
           break;
@@ -280,12 +281,50 @@ function PlayerBody({
   const activeName = view.players.find((p) => p.id === view.activePlayerId)?.name ?? "…";
   const me = view.players.find((p) => p.id === view.myPlayerId);
   const [confirmExit, setConfirmExit] = useState(false);
+  const [pendingPawn, setPendingPawn] = useState<number | null>(null);
   const travel = useTravelAnimation(view.lastMove, view.players, view.phase);
 
   const selectable =
     view.phase === "move" && view.isMyTurn && view.myValidMoves.length > 0
       ? { playerId: view.myPlayerId, pawnIndexes: view.myValidMoves }
       : null;
+
+  // Clear pending selection when the move context changes.
+  useEffect(() => {
+    setPendingPawn(null);
+  }, [view.phase, view.isMyTurn, view.currentRoll, view.myValidMoves.join(",")]);
+
+  const previewDest: Coord | null = (() => {
+    if (
+      pendingPawn == null ||
+      !me?.color ||
+      view.currentRoll == null ||
+      view.phase !== "move" ||
+      !view.isMyTurn
+    ) {
+      return null;
+    }
+    const pos = me.pawns[pendingPawn];
+    if (pos == null) return null;
+    const dest = destForPawn(pos, view.currentRoll);
+    return coordFor(me.color, dest);
+  })();
+
+  const selectedPawn =
+    pendingPawn != null && selectable
+      ? { playerId: view.myPlayerId, pawnIndex: pendingPawn }
+      : null;
+
+  const handlePawnClick = (pawnIndex: number) => {
+    setPendingPawn((prev) => (prev === pawnIndex ? null : pawnIndex));
+  };
+
+  const handleDestClick = () => {
+    if (pendingPawn == null) return;
+    const idx = pendingPawn;
+    setPendingPawn(null);
+    onMove(idx);
+  };
 
   if (view.phase === "lobby") {
     const connected = view.players.filter((p) => p.connected).length;
@@ -457,13 +496,69 @@ function PlayerBody({
   }
 
   // In-game phases: roll / move / resolution — fit in one phone viewport.
-  // Board fills leftover space as a square; controls stay shrink-0.
+  // Board fills leftover space; bottom dock keeps fixed slots so the board
+  // doesn't jump when dice / copy / buttons swap.
+  const showDice =
+    view.phase === "move" ||
+    view.phase === "resolution" ||
+    isRolling ||
+    (view.phase === "roll" && view.isMyTurn);
+  // Only tumble during the roll phase; once we have a result / move phase, show the number.
+  const diceRolling = isRolling && view.phase === "roll";
+  const diceValue = diceRolling ? null : view.currentRoll;
+
+  let dockTitle = "";
+  let dockSubtitle = "";
+  let dockTone: "calm" | "talk" | "danger" | "success" = "calm";
+  let dockAction: { label: string; onClick: () => void; variant?: "primary" | "ink" } | null =
+    null;
+
+  if (view.phase === "roll") {
+    if (view.isMyTurn) {
+      if (isRolling) {
+        dockTitle = "Throwing…";
+        dockSubtitle = "Shells are tumbling";
+      } else {
+        dockTitle = "Your turn";
+        dockSubtitle = "Throw the shells to roll.";
+        dockAction = { label: "Throw Shells", onClick: onThrow };
+      }
+    } else {
+      dockTitle = `${activeName}'s turn`;
+      dockSubtitle = "Waiting for their throw…";
+    }
+  } else if (view.phase === "move") {
+    if (view.isMyTurn) {
+      if (view.myValidMoves.length > 0) {
+        dockTitle =
+          pendingPawn != null ? "Confirm move" : "Your move";
+        dockSubtitle =
+          pendingPawn != null
+            ? "Tap the highlighted square to move"
+            : "Tap your pawn to preview the landing square";
+      } else {
+        dockTitle = "No valid moves";
+        dockSubtitle = "Nothing you can move with this roll.";
+        dockTone = "talk";
+        dockAction = { label: "Skip Turn", onClick: onSkip, variant: "ink" };
+      }
+    } else {
+      dockTitle = `${activeName} is moving`;
+      dockSubtitle = `Rolled a ${view.currentRoll ?? "?"}.`;
+    }
+  } else if (view.phase === "resolution") {
+    dockTitle = travel
+      ? `${travel.to - travel.from} space${travel.to - travel.from === 1 ? "" : "s"}`
+      : "…";
+    dockSubtitle = "Watch the path";
+  }
+
   return (
     <div className="relative mt-1 flex min-h-0 flex-1 flex-col gap-1.5 sm:mt-2 sm:gap-2">
       <StatusStrip
         turnName={activeName}
         isMyTurn={view.isMyTurn}
-        roll={view.phase === "move" ? view.currentRoll : null}
+        roll={view.phase === "move" || view.phase === "resolution" ? view.currentRoll : null}
         seconds={view.isMyTurn && !view.paused && seconds > 0 ? seconds : null}
       />
 
@@ -483,93 +578,54 @@ function PlayerBody({
             orientFor={view.myColor}
             className="!box-border !h-full !w-full !p-1.5 sm:!p-3"
             selectable={selectable}
-            onPawnClick={onMove}
+            onPawnClick={handlePawnClick}
+            previewDest={previewDest}
+            selectedPawn={selectedPawn}
+            onDestClick={handleDestClick}
             travel={travel}
           />
         </div>
       </div>
 
-      <div className="flex shrink-0 flex-col gap-1.5 overflow-visible sm:gap-2">
-        {view.phase === "roll" && (
-          <div className="space-y-1.5 overflow-visible sm:space-y-2">
-            {(isRolling || view.isMyTurn) && (
-              <div className="flex justify-center overflow-visible py-0.5">
-                <ShellDice
-                  value={isRolling ? null : view.currentRoll}
-                  size="sm"
-                  rolling={isRolling}
-                  animate={settleDice}
-                />
-              </div>
-            )}
-            {view.isMyTurn ? (
-              isRolling ? (
-                <Instruction compact title="Throwing…" subtitle="Shells are tumbling" />
-              ) : (
-                <>
-                  <Instruction compact title="Your turn" subtitle="Throw the shells to roll." />
-                  <PrimaryButton className="animate-pulseGlow !min-h-12 !py-2.5 !text-base" onClick={onThrow}>
-                    Throw Shells
-                  </PrimaryButton>
-                </>
-              )
-            ) : (
-              <Instruction compact title={`${activeName}'s turn`} subtitle="Waiting for their throw…" />
-            )}
-          </div>
-        )}
-
-        {view.phase === "move" && (
-          <div className="space-y-1.5 overflow-visible sm:space-y-2">
-            <div className="flex justify-center overflow-visible py-0.5">
-              <ShellDice
-                value={view.currentRoll}
-                size="sm"
-                rolling={false}
-                animate={settleDice}
-              />
-            </div>
-            {view.isMyTurn ? (
-              view.myValidMoves.length > 0 ? (
-                <p className="text-center text-sm text-surface/70">
-                  Tap your pawn to move
-                </p>
-              ) : (
-                <>
-                  <Instruction
-                    compact
-                    title="No valid moves"
-                    subtitle="Nothing you can move with this roll."
-                    tone="talk"
-                  />
-                  <PrimaryButton variant="ink" className="!min-h-12 !py-2.5 !text-base" onClick={onSkip}>
-                    Skip Turn
-                  </PrimaryButton>
-                </>
-              )
-            ) : (
-              <Instruction
-                compact
-                title={`${activeName} is moving`}
-                subtitle={`Rolled a ${view.currentRoll ?? "?"}.`}
-              />
-            )}
-          </div>
-        )}
-
-        {view.phase === "resolution" && (
-          <div className="space-y-1.5 sm:space-y-2">
-            <Instruction
-              compact
-              title={
-                travel
-                  ? `${travel.to - travel.from} space${travel.to - travel.from === 1 ? "" : "s"}`
-                  : "…"
-              }
-              subtitle="Watch the path"
+      {/* Fixed dock: dice / message / action always occupy the same space */}
+      <div className="flex shrink-0 flex-col gap-1.5 sm:gap-2">
+        <div className="flex h-10 items-center justify-center overflow-visible sm:h-11">
+          <div className={showDice ? "" : "invisible"} aria-hidden={!showDice}>
+            <ShellDice
+              value={diceValue}
+              size="sm"
+              rolling={diceRolling}
+              animate={settleDice}
             />
           </div>
-        )}
+        </div>
+
+        <div className="flex min-h-[3.25rem] flex-col items-center justify-center px-1 text-center sm:min-h-[3.75rem]">
+          <p className="font-display text-lg font-bold leading-tight text-surface sm:text-xl">
+            {dockTitle || "\u00A0"}
+          </p>
+          <p className={`mt-0.5 text-sm leading-snug sm:text-base ${
+            dockTone === "talk" ? "text-warn" : "text-surface/70"
+          }`}>
+            {dockSubtitle || "\u00A0"}
+          </p>
+        </div>
+
+        <div className="min-h-12">
+          {dockAction ? (
+            <PrimaryButton
+              variant={dockAction.variant === "ink" ? "ink" : "primary"}
+              className={`!min-h-12 !w-full !py-2.5 !text-base ${
+                dockAction.label === "Throw Shells" ? "animate-pulseGlow" : ""
+              }`}
+              onClick={dockAction.onClick}
+            >
+              {dockAction.label}
+            </PrimaryButton>
+          ) : (
+            <div className="min-h-12" aria-hidden="true" />
+          )}
+        </div>
 
         {/* Global controls — ≥44px touch targets */}
         <div className="flex shrink-0 items-center gap-2 pt-0.5">

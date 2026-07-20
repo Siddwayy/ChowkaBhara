@@ -7,11 +7,15 @@ import {
   isSafeCell,
   pathStepCoords,
   type Color,
+  type Coord,
   type PawnShape,
   type PlayerPublic,
 } from "@chowka/shared";
 import { COLOR_THEME } from "../lib/colors";
+import { zoneBaseFill } from "../lib/boardZones";
 import type { TravelAnim } from "../lib/useTravelAnimation";
+
+const CENTER_RC = (BOARD_SIZE - 1) / 2;
 
 interface TokenRef {
   key: string;
@@ -60,6 +64,9 @@ export function Board({
   selectable = null,
   onPawnClick,
   travel = null,
+  previewDest = null,
+  selectedPawn = null,
+  onDestClick,
 }: {
   players: PlayerPublic[];
   activePlayerId?: string | null;
@@ -71,6 +78,12 @@ export function Board({
   onPawnClick?: (pawnIndex: number) => void;
   /** Active path-walk animation for all clients. */
   travel?: TravelAnim | null;
+  /** Landing cell to highlight after selecting a pawn (row, col). */
+  previewDest?: Coord | null;
+  /** Pawn currently chosen for move preview. */
+  selectedPawn?: { playerId: string; pawnIndex: number } | null;
+  /** Confirm move by tapping the highlighted destination. */
+  onDestClick?: () => void;
 }) {
   const rotation = orientFor ? ORIENT_DEG[orientFor] : 0;
   const livePlayers = players.filter((p) => !p.left);
@@ -108,6 +121,12 @@ export function Board({
     travel && pathCoords.length > 0
       ? cellKey(pathCoords[pathCoords.length - 1]![0], pathCoords[pathCoords.length - 1]![1])
       : null;
+
+  const previewKey = previewDest ? cellKey(previewDest[0], previewDest[1]) : null;
+  const previewColor = selectedPawn
+    ? (livePlayers.find((p) => p.id === selectedPawn.playerId)?.color as Color | null | undefined)
+    : null;
+  const previewTheme = previewColor ? COLOR_THEME[previewColor] : null;
 
   // Gather tokens per cell — traveling pawn uses stepPos instead of server pos.
   const byCell = new Map<string, TokenRef[]>();
@@ -192,12 +211,17 @@ export function Board({
       >
         <div className="relative aspect-square w-full overflow-hidden rounded-sm bg-[#e8d4b0]">
           <div
-            className="absolute inset-0 grid grid-cols-5 grid-rows-5"
-            style={{ gap: 0, border: "2.5px solid #1a1208" }}
+            className="absolute inset-0 grid"
+            style={{
+              gap: 0,
+              border: "2.5px solid #1a1208",
+              gridTemplateColumns: `repeat(${BOARD_SIZE}, 1fr)`,
+              gridTemplateRows: `repeat(${BOARD_SIZE}, 1fr)`,
+            }}
           >
             {cells.map(({ r, c }) => {
               const safe = isSafeCell([r, c]);
-              const isCenter = r === 2 && c === 2;
+              const isCenter = r === CENTER_RC && c === CENTER_RC;
               const homeColor = homeByCell.get(cellKey(r, c)) ?? null;
               const homeTheme = homeColor ? COLOR_THEME[homeColor] : null;
               const isActiveHome =
@@ -206,27 +230,30 @@ export function Board({
               const isCurrent = currentKey === k;
               const isTrail = trailKeys.has(k);
               const isDestLand = travel?.landed && destKey === k;
+              const isPreviewDest = previewKey === k;
 
               let crossColor = "#1a1208";
               if (isCenter) crossColor = "#B8860B";
               else if (homeTheme) crossColor = homeTheme.hex;
-              else if (safe) crossColor = "#3d2a12";
+              else if (safe) crossColor = "#f0e0c4";
 
-              let bg = "linear-gradient(180deg, #f0e0c4 0%, #e2cb9e 100%)";
+              let bg = zoneBaseFill(r, c, safe, isCenter);
               if (isDestLand && travelTheme) {
                 bg = `linear-gradient(180deg, ${travelTheme.hex}aa 0%, ${travelTheme.hex}66 100%)`;
               } else if (isCurrent && travelTheme) {
                 bg = `linear-gradient(180deg, ${travelTheme.hex}99 0%, ${travelTheme.hex}55 100%)`;
               } else if (isTrail && travelTheme) {
                 bg = `linear-gradient(180deg, ${travelTheme.hex}44 0%, #e2cb9e 100%)`;
-              } else if (isCenter) {
-                bg = "linear-gradient(160deg, #FFE9A8 0%, #F5C842 45%, #D4A017 100%)";
+              } else if (isPreviewDest && previewTheme) {
+                bg = `linear-gradient(180deg, ${previewTheme.hex}bb 0%, ${previewTheme.hex}66 100%)`;
               }
 
               const travelRing =
                 isCurrent || isDestLand
                   ? `inset 0 0 0 2.5px ${travelTheme?.hex ?? "#FFB020"}`
-                  : undefined;
+                  : isPreviewDest
+                    ? `inset 0 0 0 3px ${previewTheme?.hex ?? "#FFB020"}`
+                    : undefined;
               const centerGlow = isCenter
                 ? "inset 0 0 10px rgba(212,160,23,0.55), inset 0 0 0 2px rgba(184,134,11,0.85)"
                 : undefined;
@@ -236,7 +263,7 @@ export function Board({
                   key={k}
                   className={`relative flex items-center justify-center transition-colors duration-150 ${
                     isActiveHome ? "animate-pulseGlow" : ""
-                  } ${isCurrent || isDestLand ? "animate-pulseGlow" : ""}`}
+                  } ${isCurrent || isDestLand || isPreviewDest ? "animate-pulseGlow" : ""}`}
                   style={{
                     background: bg,
                     borderRight: c < BOARD_SIZE - 1 ? "2.5px solid #1a1208" : undefined,
@@ -258,6 +285,10 @@ export function Board({
               const top = (t.r + 0.5) * (100 / BOARD_SIZE) + dy;
               const finished = t.pos === CENTER_INDEX;
               const selectablePawn = canSelect(t.playerId, t.pawnIndex);
+              const isSelected =
+                selectedPawn != null &&
+                selectedPawn.playerId === t.playerId &&
+                selectedPawn.pawnIndex === t.pawnIndex;
               const isTraveling =
                 travel != null &&
                 travel.playerId === t.playerId &&
@@ -270,7 +301,9 @@ export function Board({
                   disabled={!selectablePawn}
                   aria-label={
                     selectablePawn
-                      ? `Move pawn ${t.pawnIndex + 1}`
+                      ? isSelected
+                        ? `Selected pawn ${t.pawnIndex + 1}`
+                        : `Select pawn ${t.pawnIndex + 1}`
                       : `Pawn ${t.pawnIndex + 1}`
                   }
                   onClick={() => {
@@ -284,24 +317,23 @@ export function Board({
                   style={{
                     left: `${left}%`,
                     top: `${top}%`,
-                    // Larger hit target on phones; visual token stays ~70% inside.
-                    width: selectablePawn ? "20%" : "14%",
-                    height: selectablePawn ? "20%" : "14%",
+                    width: "10%",
+                    height: "10%",
                     transform: "translate(-50%, -50%)",
-                    zIndex: selectablePawn ? 8 : finished ? 5 : isTraveling ? 7 : 2,
+                    zIndex: isSelected ? 9 : selectablePawn ? 8 : finished ? 5 : isTraveling ? 7 : 2,
                     background: "transparent",
                     border: "none",
                     padding: 0,
                   }}
                 >
                   <div className="flex h-full w-full items-center justify-center">
-                    <div className={selectablePawn ? "h-[65%] w-[65%]" : "h-[70%] w-[70%]"}>
+                    <div className="relative h-[70%] w-[70%]">
                       <PawnToken
                         color={t.color}
                         shape={t.shape}
                         tokenKey={t.key}
                         finished={finished}
-                        selectable={selectablePawn}
+                        selected={isSelected}
                       />
                     </div>
                   </div>
@@ -309,6 +341,25 @@ export function Board({
               );
             })}
           </div>
+
+          {/* Destination confirm — sits above pawns so the landing cell is always tappable */}
+          {previewDest && onDestClick && (
+            <button
+              type="button"
+              aria-label="Confirm move to highlighted square"
+              onClick={onDestClick}
+              className="absolute z-[10] cursor-pointer rounded-sm active:opacity-80"
+              style={{
+                left: `${(previewDest[1] / BOARD_SIZE) * 100}%`,
+                top: `${(previewDest[0] / BOARD_SIZE) * 100}%`,
+                width: `${100 / BOARD_SIZE}%`,
+                height: `${100 / BOARD_SIZE}%`,
+                background: "transparent",
+                border: "none",
+                padding: 0,
+              }}
+            />
+          )}
         </div>
       </div>
     </div>
@@ -341,24 +392,26 @@ function SafeCross({ color, heavy = false }: { color: string; heavy?: boolean })
   );
 }
 
+const SELECT_STROKE = "#2ec4b6";
+
 function PawnToken({
   color,
   shape,
   tokenKey,
   finished,
-  selectable,
+  selected = false,
 }: {
   color: Color;
   shape: PawnShape;
   tokenKey: string;
   finished?: boolean;
-  selectable?: boolean;
+  selected?: boolean;
 }) {
   const theme = COLOR_THEME[color];
   const gradId = `pawn-face-${tokenKey}`;
   return (
     <div
-      className={`relative h-full w-full transition-transform ${selectable ? "scale-105" : ""}`}
+      className="relative h-full w-full"
       style={{
         filter: finished
           ? `drop-shadow(0 0 6px ${theme.hex})`
@@ -373,6 +426,46 @@ function PawnToken({
             <stop offset="100%" stopColor={theme.edge} />
           </radialGradient>
         </defs>
+        {selected && shape === "circle" && (
+          <circle
+            cx="20"
+            cy="20"
+            r="19.25"
+            fill="none"
+            stroke={SELECT_STROKE}
+            strokeWidth="2.75"
+          />
+        )}
+        {selected && shape === "square" && (
+          <rect
+            x="1.5"
+            y="1.5"
+            width="37"
+            height="37"
+            rx="6"
+            fill="none"
+            stroke={SELECT_STROKE}
+            strokeWidth="2.75"
+          />
+        )}
+        {selected && shape === "triangle" && (
+          <path
+            d="M20 1.5 L38.5 36.5 L1.5 36.5 Z"
+            fill="none"
+            stroke={SELECT_STROKE}
+            strokeWidth="2.75"
+            strokeLinejoin="round"
+          />
+        )}
+        {selected && shape === "star" && (
+          <path
+            d="M20 1 L25.2 14 L39 14.4 L28 22.5 L31.8 36 L20 28.5 L8.2 36 L12 22.5 L1 14.4 L14.8 14 Z"
+            fill="none"
+            stroke={SELECT_STROKE}
+            strokeWidth="2.5"
+            strokeLinejoin="round"
+          />
+        )}
         {shape === "circle" && (
           <>
             <circle cx="20" cy="20" r="18.5" fill={theme.edge} />
@@ -420,7 +513,7 @@ export function Pockets({ players }: { players: PlayerPublic[] }) {
         .filter((p) => p.color && !p.left)
         .map((p) => {
           const theme = COLOR_THEME[p.color as Color];
-          const atBase = p.pawns.filter((x) => x <= 0).length;
+          const atBase = p.pawns.filter((x) => x < 0).length;
           const home = p.pawns.filter((x) => x === CENTER_INDEX).length;
           return (
             <div
