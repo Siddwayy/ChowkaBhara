@@ -403,6 +403,8 @@ function PlayerBody({
   }
 
   // In-game phases: roll / move / resolution — fit in one phone viewport.
+  // Board takes leftover space; controls stay shrink-0 so shells aren't clipped
+  // by overflow-hidden + justify-end packing.
   return (
     <div className="relative mt-2 flex min-h-0 flex-1 flex-col gap-2">
       <StatusStrip
@@ -412,20 +414,30 @@ function PlayerBody({
         seconds={view.isMyTurn && !view.paused && seconds > 0 ? seconds : null}
       />
 
-      <div className="mx-auto w-full max-w-[min(100%,48dvh)] shrink">
-        <Board
-          players={view.players}
-          activePlayerId={view.activePlayerId}
-          orientFor={view.myColor}
-          className="!p-2 sm:!p-3"
-        />
+      <div className="mx-auto grid min-h-0 w-full flex-1 place-items-center overflow-hidden">
+        <div
+          className="aspect-square"
+          style={{
+            width: "min(100%, 42dvh)",
+            height: "min(100%, 42dvh)",
+            maxWidth: "100%",
+            maxHeight: "100%",
+          }}
+        >
+          <Board
+            players={view.players}
+            activePlayerId={view.activePlayerId}
+            orientFor={view.myColor}
+            className="!box-border !h-full !w-full !p-2 sm:!p-3"
+          />
+        </div>
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col justify-end gap-2">
+      <div className="flex shrink-0 flex-col gap-2 overflow-visible">
         {view.phase === "roll" && (
-          <div className="space-y-2">
+          <div className="space-y-2 overflow-visible">
             {(isRolling || view.isMyTurn) && (
-              <div className="flex justify-center">
+              <div className="flex justify-center overflow-visible py-1">
                 <ShellDice
                   value={isRolling ? null : view.currentRoll}
                   size="sm"
@@ -452,10 +464,10 @@ function PlayerBody({
         )}
 
         {view.phase === "move" && (
-          <div className="space-y-2">
+          <div className="space-y-2 overflow-visible">
             {view.isMyTurn ? (
               <>
-                <div className="flex justify-center">
+                <div className="flex justify-center overflow-visible py-1">
                   <ShellDice
                     value={view.currentRoll}
                     size="sm"
@@ -511,7 +523,7 @@ function PlayerBody({
               </>
             ) : (
               <>
-                <div className="flex justify-center">
+                <div className="flex justify-center overflow-visible py-1">
                   <ShellDice value={view.currentRoll} size="sm" animate={settleDice} />
                 </div>
                 <Instruction

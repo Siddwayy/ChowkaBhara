@@ -25,17 +25,27 @@ export function ShellDice({
   }, [rolling]);
 
   const settledOpen = value == null ? 0 : value === 8 ? 0 : value;
-  const shellPx = size === "lg" ? 34 : size === "sm" ? 16 : 26;
+  const shellPx = size === "lg" ? 34 : size === "sm" ? 22 : 26;
   const numberCls =
     size === "lg"
       ? "text-7xl sm:text-8xl"
       : size === "sm"
-        ? "text-2xl"
+        ? "text-3xl"
         : "text-5xl";
+  const compact = size === "sm";
 
   return (
-    <div className={`flex flex-col items-center ${size === "sm" ? "gap-1.5" : "gap-3"}`}>
-      <div className={`flex items-center ${size === "sm" ? "gap-1" : "gap-1.5"}`}>
+    <div
+      className={`flex items-center overflow-visible ${
+        compact ? "flex-row gap-3 py-1" : "flex-col gap-3"
+      }`}
+    >
+      {/* Extra vertical pad so shellRoll translateY isn't clipped */}
+      <div
+        className={`flex items-center overflow-visible ${
+          compact ? "gap-1.5 py-2" : "gap-1.5"
+        }`}
+      >
         {[0, 1, 2, 3].map((i) => {
           const open = rolling
             ? (tick + i * 2 + (tick % 3)) % 2 === 0
@@ -75,11 +85,11 @@ function Shell({
 }) {
   return (
     <div
-      className={className}
+      className={`overflow-visible ${className}`}
       style={{ animationDelay: `${delayMs}ms` }}
       aria-hidden="true"
     >
-      <svg width={px} height={px * 1.35} viewBox="0 0 26 35">
+      <svg width={px} height={px * 1.35} viewBox="0 0 26 35" className="overflow-visible">
         <ellipse
           cx="13"
           cy="17.5"

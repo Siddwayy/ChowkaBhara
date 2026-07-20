@@ -9,17 +9,34 @@ export interface Env {
 }
 
 function parseAllowedOrigins(raw: string | undefined): string[] {
-  if (!raw) return ["http://localhost:4321"];
+  if (!raw) return ["http://localhost:4321", "http://127.0.0.1:4321"];
   return raw
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
 }
 
+/** Exact match, `*`, or patterns like `https://*.vercel.app`. */
+function originAllowed(origin: string, allowed: string[]): boolean {
+  if (!origin) return false;
+  for (const pattern of allowed) {
+    if (pattern === "*" || pattern === origin) return true;
+    const star = pattern.indexOf("://*.");
+    if (star !== -1) {
+      const prefix = pattern.slice(0, star + 3); // e.g. https://
+      const hostSuffix = pattern.slice(star + 4); // e.g. vercel.app
+      if (!origin.startsWith(prefix)) continue;
+      const host = origin.slice(prefix.length);
+      if (host === hostSuffix || host.endsWith(`.${hostSuffix}`)) return true;
+    }
+  }
+  return false;
+}
+
 function corsHeaders(request: Request, env: Env): HeadersInit {
   const origin = request.headers.get("Origin") ?? "";
   const allowed = parseAllowedOrigins(env.ALLOWED_ORIGINS);
-  const ok = Boolean(origin) && (allowed.includes(origin) || allowed.includes("*"));
+  const ok = originAllowed(origin, allowed);
   const headers: Record<string, string> = {
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type",

@@ -38,8 +38,9 @@ export function HomeLobby() {
     playSound("join");
     setBusy(true);
     setError(null);
+    const serverUrl = getServerHttpUrl();
     try {
-      const res = await fetch(`${getServerHttpUrl()}/api/lobby`, { method: "POST" });
+      const res = await fetch(`${serverUrl}/api/lobby`, { method: "POST" });
       if (!res.ok) throw new Error("Could not create lobby");
       const data = (await res.json()) as { code: string };
       const params = new URLSearchParams({
@@ -56,7 +57,7 @@ export function HomeLobby() {
         msg.includes("Load failed");
       setError(
         looksNetwork
-          ? "Can't reach the game server. Check your connection and try again."
+          ? `Can't reach the game server (${serverUrl}). Set PUBLIC_GAME_SERVER_URL on Vercel to your Worker URL, allow this site in ALLOWED_ORIGINS, and redeploy.`
           : msg,
       );
       setBusy(false);
