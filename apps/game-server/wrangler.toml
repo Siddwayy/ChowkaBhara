@@ -2,8 +2,11 @@ name = "chowka-bhara"
 main = "src/index.ts"
 compatibility_date = "2024-12-01"
 
+# SOURCE OF TRUTH for Worker env — every git/Workers Builds deploy overwrites
+# dashboard [vars] with these values. Do not rely on Cloudflare UI alone.
 [vars]
-# Comma-separated. Supports exact origins and https://*.vercel.app wildcards.
+# Comma-separated. Exact origins and https://*.vercel.app wildcards supported.
+# Add any custom domain here (e.g. https://chowka.example.com) or it will be blocked.
 ALLOWED_ORIGINS = "http://localhost:4321,http://127.0.0.1:4321,https://*.vercel.app"
 
 [[durable_objects.bindings]]

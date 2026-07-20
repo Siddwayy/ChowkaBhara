@@ -35,17 +35,20 @@ pnpm --filter @chowka/web dev           # http://localhost:4321
 
 ### Env
 
-`apps/web/.env` (copy from `.env.example`):
+**Local** — `apps/web/.env` (copy from `.env.example`, gitignored):
 
 ```
 PUBLIC_GAME_SERVER_URL=http://localhost:8787
 ```
 
-`apps/game-server/wrangler.toml` `[vars]`:
+**Production / Vercel** — committed in `apps/web/.env.production` so every deploy
+gets the Worker URL without relying on the Vercel dashboard. Dashboard env with
+the same name still overrides the file if you set one.
 
-```
-ALLOWED_ORIGINS = "http://localhost:4321"
-```
+**Cloudflare Worker** — `ALLOWED_ORIGINS` lives in `apps/game-server/wrangler.toml`
+`[vars]`. Every Worker deploy reapplies that file (dashboard-only edits get
+overwritten). It already allows localhost and `https://*.vercel.app`. Add custom
+domains to that string before pushing.
 
 ## Routes (web)
 
@@ -77,9 +80,10 @@ ALLOWED_ORIGINS = "http://localhost:4321"
    - Install Command: `cd ../.. && pnpm install --frozen-lockfile`
    - Build Command: `pnpm vercel-build` (builds `@chowka/shared`, then Astro)
    - Output Directory: leave default (do not override)
-   - Env: `PUBLIC_GAME_SERVER_URL` = Worker origin (HTTPS), e.g. `https://chowka-bhara.<subdomain>.workers.dev`
-   - Redeploy after setting env.
-4. Set the Worker `ALLOWED_ORIGINS` var to your exact Vercel origin(s), comma-separated, e.g. `https://your-app.vercel.app`.
+   - Env: usually none required — `apps/web/.env.production` already sets
+     `PUBLIC_GAME_SERVER_URL`. Optional dashboard override for Production + Preview.
+4. **Worker CORS** — keep `ALLOWED_ORIGINS` correct in `wrangler.toml` (not only
+   in the Cloudflare UI). Include `https://*.vercel.app` and any custom domain.
 
 ## Game model (server-authoritative)
 
