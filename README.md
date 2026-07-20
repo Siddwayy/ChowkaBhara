@@ -66,8 +66,19 @@ ALLOWED_ORIGINS = "http://localhost:4321"
 ## Deploy checklist (both done in-browser)
 
 1. `pnpm build`
-2. **Cloudflare** — deploy the Worker (`apps/game-server`) via the dashboard or `wrangler deploy`. Note the URL, e.g. `https://chowka-bhara.<subdomain>.workers.dev`.
-3. **Vercel** — deploy `apps/web`. Set env `PUBLIC_GAME_SERVER_URL` to the Worker origin (HTTPS) and redeploy.
+2. **Cloudflare** — deploy the Worker (`apps/game-server`) via Workers Builds (Git) or CLI.
+   - **Workers Builds (dashboard)** — use these exact commands (do **not** omit `run`; bare `pnpm … deploy` is a different pnpm command and fails with `ERR_PNPM_INVALID_DEPLOY_TARGET`):
+     - Build command: `pnpm --filter @chowka/shared build`
+     - Deploy command: `pnpm --filter @chowka/game-server run deploy`
+   - **CLI:** `pnpm deploy:server` (builds shared, then `wrangler deploy`).
+   - Note the URL, e.g. `https://chowka-bhara.<subdomain>.workers.dev`.
+3. **Vercel** — deploy `apps/web`:
+   - Root Directory: `apps/web`
+   - Install Command: `cd ../.. && pnpm install --frozen-lockfile`
+   - Build Command: `pnpm vercel-build` (builds `@chowka/shared`, then Astro)
+   - Output Directory: leave default (do not override)
+   - Env: `PUBLIC_GAME_SERVER_URL` = Worker origin (HTTPS), e.g. `https://chowka-bhara.<subdomain>.workers.dev`
+   - Redeploy after setting env.
 4. Set the Worker `ALLOWED_ORIGINS` var to your exact Vercel origin(s), comma-separated, e.g. `https://your-app.vercel.app`.
 
 ## Game model (server-authoritative)
