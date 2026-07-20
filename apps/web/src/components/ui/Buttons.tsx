@@ -26,7 +26,7 @@ export function PrimaryButton({
   return (
     <button
       type="button"
-      className={`min-h-14 w-full rounded-2xl border-2 px-4 py-4 font-display text-lg font-semibold tracking-wide transition active:translate-y-0.5 active:shadow-none disabled:active:translate-y-0 ${styles[variant]} ${className}`}
+      className={`min-h-14 w-full rounded-2xl border-2 px-4 py-3.5 font-display text-base font-semibold tracking-wide transition active:translate-y-0.5 active:shadow-none disabled:active:translate-y-0 sm:py-4 sm:text-lg ${styles[variant]} ${className}`}
       {...props}
     >
       {children}

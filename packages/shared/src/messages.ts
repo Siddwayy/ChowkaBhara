@@ -4,6 +4,7 @@ import {
   ClientRoleSchema,
   ColorSchema,
   GameOverResultSchema,
+  PawnShapeSchema,
   RoomViewSchema,
 } from "./types.js";
 
@@ -22,6 +23,10 @@ export const ClientMessageSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("setColor"),
     color: ColorSchema,
+  }),
+  z.object({
+    type: z.literal("setShape"),
+    shape: PawnShapeSchema,
   }),
   z.object({
     type: z.literal("setExpectedPlayers"),

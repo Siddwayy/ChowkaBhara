@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { COLORS } from "./constants.js";
+import { COLORS, PAWN_SHAPES } from "./constants.js";
 
 export const PhaseSchema = z.enum([
   "lobby",
@@ -16,12 +16,16 @@ export type ClientRole = z.infer<typeof ClientRoleSchema>;
 export const ColorSchema = z.enum(COLORS);
 export type Color = z.infer<typeof ColorSchema>;
 
+export const PawnShapeSchema = z.enum(PAWN_SHAPES);
+export type PawnShape = z.infer<typeof PawnShapeSchema>;
+
 export const PlayerPublicSchema = z.object({
   id: z.string(),
   name: z.string(),
   isHost: z.boolean(),
   connected: z.boolean(),
   color: ColorSchema.nullable(),
+  shape: PawnShapeSchema.nullable().optional().default(null),
   ready: z.boolean().optional().default(false),
   /** Pawn track positions, length 4: -1 pocket .. 24 center. */
   pawns: z.array(z.number()),
@@ -85,6 +89,7 @@ export const PlayerViewSchema = z.object({
   ...sharedViewFields,
   myPlayerId: z.string(),
   myColor: ColorSchema.nullable(),
+  myShape: PawnShapeSchema.nullable().optional().default(null),
   isMyTurn: z.boolean(),
   myValidMoves: z.array(z.number()).optional().default([]),
   myReady: z.boolean().optional().default(false),

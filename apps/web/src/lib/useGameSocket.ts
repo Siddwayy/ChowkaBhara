@@ -31,11 +31,14 @@ export function useGameSocket({
   const wsRef = useRef<WebSocket | null>(null);
   const joinedRef = useRef(false);
 
-  const send = useCallback((msg: ClientMessage) => {
+  const send = useCallback((msg: ClientMessage): boolean => {
     const ws = wsRef.current;
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify(msg));
+      return true;
     }
+    setLastError("Not connected — try again in a moment");
+    return false;
   }, []);
 
   useEffect(() => {
@@ -85,9 +88,7 @@ export function useGameSocket({
           const raw = JSON.parse(String(ev.data));
           const parsed = ServerMessageSchema.safeParse(raw);
           if (!parsed.success) {
-            if (raw && typeof raw === "object" && raw.type === "state" && raw.view) {
-              setView(raw.view as RoomView);
-            }
+            // Reject invalid payloads instead of casting partial state into React.
             return;
           }
           const msg = parsed.data;
@@ -138,10 +139,12 @@ export function useCountdown(phaseEndsAt: number | null): number {
       return;
     }
     const tick = () => {
-      setRemaining(Math.max(0, Math.ceil((phaseEndsAt - Date.now()) / 1000)));
+      const next = Math.max(0, Math.ceil((phaseEndsAt - Date.now()) / 1000));
+      setRemaining((prev) => (prev === next ? prev : next));
     };
     tick();
-    const id = setInterval(tick, 250);
+    // 1s is enough for a whole-second display and avoids thrashing the board.
+    const id = setInterval(tick, 1000);
     return () => clearInterval(id);
   }, [phaseEndsAt]);
 

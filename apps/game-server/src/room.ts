@@ -3,6 +3,7 @@ import {
   COLORS,
   MAX_PLAYERS,
   MIN_PLAYERS,
+  PAWN_SHAPES,
   PAWNS_PER_PLAYER,
   RECONNECT_GRACE_MS,
   RESOLUTION_MS,
@@ -23,6 +24,7 @@ import {
   type GameOverResult,
   type HostView,
   type LastMove,
+  type PawnShape,
   type Phase,
   type PlayerPublic,
   type PlayerView,
@@ -35,6 +37,7 @@ interface PlayerSecret {
   isHost: boolean;
   connected: boolean;
   color: Color | null;
+  shape: PawnShape | null;
   ready: boolean;
   pawns: number[];
   hasCaptured: boolean;
@@ -97,11 +100,20 @@ function normalizeRoom(stored: RoomState): RoomState {
     ...p,
     ready: p.ready ?? false,
     color: p.color ?? null,
+    shape: p.shape ?? null,
     pawns: Array.isArray(p.pawns) && p.pawns.length === PAWNS_PER_PLAYER ? p.pawns : freshPawns(),
     hasCaptured: p.hasCaptured ?? false,
     disconnectAt: p.disconnectAt ?? null,
     left: p.left ?? false,
   }));
+  // Backfill shapes for rooms persisted before pawn shapes existed.
+  for (const p of players) {
+    if (p.shape) continue;
+    const taken = new Set(
+      players.map((x) => x.shape).filter(Boolean) as PawnShape[],
+    );
+    p.shape = PAWN_SHAPES.find((s) => !taken.has(s)) ?? "circle";
+  }
   const hostPlayerId =
     stored.hostPlayerId ?? players.find((p) => p.isHost)?.id ?? players[0]?.id ?? null;
   return {
@@ -144,8 +156,8 @@ export class RoomDurableObject implements DurableObject {
 
   // ---------------------------------------------------------------- lobby ---
 
-  private pruneStaleLobbyPlayers(): void {
-    if (this.room.phase !== "lobby") return;
+  private pruneStaleLobbyPlayers(): boolean {
+    if (this.room.phase !== "lobby") return false;
     const now = Date.now();
     const before = this.room.players.length;
     this.room.players = this.room.players.filter((p) => {
@@ -153,7 +165,11 @@ export class RoomDurableObject implements DurableObject {
       if (p.disconnectAt && now - p.disconnectAt < RECONNECT_GRACE_MS) return true;
       return false;
     });
-    if (this.room.players.length !== before) this.ensureHost();
+    if (this.room.players.length !== before) {
+      this.ensureHost();
+      return true;
+    }
+    return false;
   }
 
   private lobbyCapacity(): number {
@@ -171,19 +187,30 @@ export class RoomDurableObject implements DurableObject {
 
   private firstFreeColor(): Color | null {
     const taken = this.takenColors();
-    // 2-player: seat face-to-face (red bottom, then green top).
+    // 2-player: always seat face-to-face opposites.
     if (this.room.expectedPlayerCount === 2) {
-      if (!taken.has("red")) return "red";
-      if (!taken.has("green")) return "green";
-      // Fallback if someone picked blue/yellow already.
       const seated = this.room.players.find((p) => p.color);
       if (seated?.color) {
         const opp = oppositeColor(seated.color);
-        if (!taken.has(opp)) return opp;
+        return taken.has(opp) ? null : opp;
       }
-      return COLORS.find((c) => !taken.has(c)) ?? null;
+      return taken.has("red") ? null : "red";
     }
     return COLORS.find((c) => !taken.has(c)) ?? null;
+  }
+
+  private takenShapes(exceptId?: string): Set<PawnShape> {
+    const set = new Set<PawnShape>();
+    for (const p of this.room.players) {
+      if (p.id === exceptId) continue;
+      if (p.shape) set.add(p.shape);
+    }
+    return set;
+  }
+
+  private firstFreeShape(): PawnShape | null {
+    const taken = this.takenShapes();
+    return PAWN_SHAPES.find((s) => !taken.has(s)) ?? null;
   }
 
   /** When party size is 2, force seated players onto a facing pair. */
@@ -196,14 +223,15 @@ export class RoomDurableObject implements DurableObject {
   }
 
   private canStart(): boolean {
-    this.pruneStaleLobbyPlayers();
+    const pruned = this.pruneStaleLobbyPlayers();
+    if (pruned) void this.persist();
     const expected = this.room.expectedPlayerCount;
     if (this.room.phase !== "lobby" || expected === null) return false;
     const connected = this.room.players.filter((p) => p.connected);
     return (
       connected.length === expected &&
       connected.length >= MIN_PLAYERS &&
-      connected.every((p) => p.ready && p.color !== null)
+      connected.every((p) => p.ready && p.color !== null && p.shape !== null)
     );
   }
 
@@ -262,6 +290,7 @@ export class RoomDurableObject implements DurableObject {
       isHost: p.isHost,
       connected: p.connected,
       color: p.color,
+      shape: p.shape,
       ready: this.room.phase === "lobby" ? Boolean(p.ready) : false,
       pawns: [...p.pawns],
       hasCaptured: p.hasCaptured,
@@ -315,6 +344,7 @@ export class RoomDurableObject implements DurableObject {
       pausedByName: this.pausedByName(),
       myPlayerId: me.id,
       myColor: me.color,
+      myShape: me.shape,
       isMyTurn,
       myValidMoves: this.validMovesFor(me),
       myReady: me.ready,
@@ -331,7 +361,8 @@ export class RoomDurableObject implements DurableObject {
   }
 
   private broadcastState(): void {
-    this.pruneStaleLobbyPlayers();
+    const pruned = this.pruneStaleLobbyPlayers();
+    if (pruned) void this.persist();
     for (const [ws, meta] of this.sessions) {
       if (meta.role === "host") {
         this.send(ws, { type: "state", view: this.buildHostView() });
@@ -383,7 +414,9 @@ export class RoomDurableObject implements DurableObject {
   // ----------------------------------------------------------- game loop ---
 
   private async beginGame(): Promise<void> {
-    const seated = this.room.players.filter((p) => p.connected && p.ready && p.color);
+    const seated = this.room.players.filter(
+      (p) => p.connected && p.ready && p.color && p.shape,
+    );
     this.room.turnOrder = seated.map((p) => p.id);
     for (const p of this.room.players) {
       p.pawns = freshPawns();
@@ -401,6 +434,21 @@ export class RoomDurableObject implements DurableObject {
   }
 
   private async enterRoll(): Promise<void> {
+    // No connected seated players — cancel timers instead of looping forever.
+    if (!this.room.activePlayerId || !this.getPlayer(this.room.activePlayerId)?.connected) {
+      const next = this.nextConnectedAfter(this.room.activePlayerId);
+      this.room.activePlayerId = next;
+      if (!next) {
+        this.room.currentRoll = null;
+        this.room.lastMove = null;
+        this.room.bonusPending = false;
+        this.room.phaseEndsAt = null;
+        await this.state.storage.deleteAlarm();
+        this.broadcastState();
+        await this.persist();
+        return;
+      }
+    }
     this.room.currentRoll = null;
     this.room.lastMove = null;
     this.room.bonusPending = false;
@@ -409,7 +457,17 @@ export class RoomDurableObject implements DurableObject {
 
   private async doRoll(): Promise<void> {
     const active = this.getPlayer(this.room.activePlayerId);
-    if (!active) return;
+    if (!active || active.left || !active.connected) {
+      const next = this.nextConnectedAfter(this.room.activePlayerId);
+      this.room.activePlayerId = next;
+      if (next) await this.enterRoll();
+      else {
+        this.room.phaseEndsAt = null;
+        await this.state.storage.deleteAlarm();
+        await this.persist();
+      }
+      return;
+    }
     this.room.currentRoll = rollShells();
     this.broadcastEvent({
       kind: "rolled",
@@ -481,13 +539,30 @@ export class RoomDurableObject implements DurableObject {
     const order = this.room.turnOrder;
     if (order.length === 0) return null;
     const start = id ? order.indexOf(id) : -1;
+    // If id is not in the order (already removed), start from the end so
+    // step 1 yields order[0] — callers that need “after leaver” should pass
+    // the previous neighbor or resolve next before removal.
     for (let step = 1; step <= order.length; step++) {
       const cand = order[(start + step + order.length) % order.length]!;
       const p = this.getPlayer(cand);
       if (p && p.connected && !p.left) return cand;
     }
-    // No one connected — keep the current active player.
-    return id;
+    // Nobody connected — stop the auto-play loop.
+    return null;
+  }
+
+  /** Next seated player after `id`, even if `id` is about to leave the order. */
+  private nextAfterLeaving(id: string): string | null {
+    const order = this.room.turnOrder;
+    const start = order.indexOf(id);
+    if (start === -1) return this.nextConnectedAfter(null);
+    for (let step = 1; step <= order.length; step++) {
+      const cand = order[(start + step) % order.length]!;
+      if (cand === id) continue;
+      const p = this.getPlayer(cand);
+      if (p && p.connected && !p.left) return cand;
+    }
+    return null;
   }
 
   private async afterResolution(): Promise<void> {
@@ -502,7 +577,17 @@ export class RoomDurableObject implements DurableObject {
     }
     const next = this.nextConnectedAfter(this.room.activePlayerId);
     this.room.activePlayerId = next;
-    if (next) this.broadcastEvent({ kind: "turnPassed", playerId: next });
+    if (!next) {
+      this.room.currentRoll = null;
+      this.room.lastMove = null;
+      this.room.bonusPending = false;
+      this.room.phaseEndsAt = null;
+      await this.state.storage.deleteAlarm();
+      this.broadcastState();
+      await this.persist();
+      return;
+    }
+    this.broadcastEvent({ kind: "turnPassed", playerId: next });
     await this.enterRoll();
   }
 
@@ -583,7 +668,10 @@ export class RoomDurableObject implements DurableObject {
         break;
       case "move": {
         const active = this.getPlayer(this.room.activePlayerId);
-        if (!active || this.room.currentRoll === null) break;
+        if (!active || active.left || !active.connected || this.room.currentRoll === null) {
+          await this.enterRoll();
+          break;
+        }
         const valid = computeValidMoves(
           active.pawns,
           this.room.currentRoll,
@@ -608,17 +696,34 @@ export class RoomDurableObject implements DurableObject {
     const url = new URL(request.url);
 
     if (url.pathname === "/internal/init" && request.method === "POST") {
-      const body = (await request.json()) as { code: string };
-      if (!this.room.code) {
-        this.room = emptyRoom(body.code.toUpperCase());
-        await this.persist();
+      const body = (await request.json().catch(() => null)) as { code?: string } | null;
+      const code = typeof body?.code === "string" ? body.code.toUpperCase().trim() : "";
+      if (!code) {
+        return new Response(JSON.stringify({ error: "Missing code" }), {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        });
       }
-      return new Response(JSON.stringify({ ok: true }), {
+      // Only seed a brand-new DO; never wipe or reuse an occupied room.
+      if (this.room.code) {
+        return new Response(
+          JSON.stringify({ ok: false, created: false, code: this.room.code }),
+          { headers: { "Content-Type": "application/json" } },
+        );
+      }
+      this.room = emptyRoom(code);
+      await this.persist();
+      return new Response(JSON.stringify({ ok: true, created: true, code }), {
         headers: { "Content-Type": "application/json" },
       });
     }
 
     if (request.headers.get("Upgrade") === "websocket") {
+      const codeParam = url.searchParams.get("code")?.toUpperCase().trim();
+      if (codeParam && !this.room.code) {
+        this.room = emptyRoom(codeParam);
+        await this.persist();
+      }
       const pair = new WebSocketPair();
       const [client, server] = Object.values(pair) as [WebSocket, WebSocket];
       this.state.acceptWebSocket(server);
@@ -768,14 +873,15 @@ export class RoomDurableObject implements DurableObject {
             return;
           }
           const isFirst = this.room.players.length === 0;
+          const rawName =
+            "name" in msg && typeof msg.name === "string" ? msg.name.trim().slice(0, 16) : "";
           player = {
             id: msg.playerId,
-            name:
-              ("name" in msg && msg.name) ||
-              `Player ${this.room.players.length + 1}`,
+            name: rawName || `Player ${this.room.players.length + 1}`,
             isHost: isFirst,
             connected: true,
             color: this.firstFreeColor(),
+            shape: this.firstFreeShape(),
             ready: false,
             pawns: freshPawns(),
             hasCaptured: false,
@@ -784,6 +890,7 @@ export class RoomDurableObject implements DurableObject {
           };
           this.room.players.push(player);
           if (isFirst) this.room.hostPlayerId = player.id;
+          if (this.room.expectedPlayerCount === 2) this.seatTwoPlayerOpposites();
           this.syncHostFlags();
         }
         meta.playerId = player.id;
@@ -831,6 +938,25 @@ export class RoomDurableObject implements DurableObject {
           return;
         }
         me.color = msg.color;
+        me.ready = false;
+        await this.persist();
+        this.broadcastState();
+        break;
+      }
+
+      case "setShape": {
+        const me = this.requirePlayer(ws, meta);
+        if (!me) return;
+        if (this.room.phase !== "lobby") return;
+        if (this.takenShapes(me.id).has(msg.shape)) {
+          this.send(ws, {
+            type: "event",
+            event: { kind: "error", message: "That pawn shape is taken" },
+          });
+          return;
+        }
+        me.shape = msg.shape;
+        me.ready = false;
         await this.persist();
         this.broadcastState();
         break;
@@ -890,6 +1016,13 @@ export class RoomDurableObject implements DurableObject {
           this.send(ws, {
             type: "event",
             event: { kind: "error", message: "Pick a color first" },
+          });
+          return;
+        }
+        if (!me.shape) {
+          this.send(ws, {
+            type: "event",
+            event: { kind: "error", message: "Pick a pawn shape first" },
           });
           return;
         }
@@ -1042,8 +1175,9 @@ export class RoomDurableObject implements DurableObject {
 
         // In-game: eliminate — remove pawns, drop from turn order, continue.
         const wasActive = this.room.activePlayerId === me.id;
+        const nextIfActive = wasActive ? this.nextAfterLeaving(me.id) : null;
         me.left = true;
-        me.pawns = me.pawns.map(() => CENTER_INDEX + 1); // off-board sentinel
+        me.pawns = me.pawns.map(() => -1); // off-board; clamped out of rankings
         me.ready = false;
         this.room.turnOrder = this.room.turnOrder.filter((id) => id !== me.id);
         if (me.isHost) this.promoteHost();
@@ -1057,15 +1191,18 @@ export class RoomDurableObject implements DurableObject {
 
         const ended = await this.checkLastStanding();
         if (!ended) {
-          if (this.room.paused) {
-            // Stay paused; just refresh state so the seat vanishes.
-            this.broadcastState();
-            await this.persist();
-          } else if (wasActive) {
-            const next = this.nextConnectedAfter(me.id);
-            this.room.activePlayerId = next;
-            if (next) this.broadcastEvent({ kind: "turnPassed", playerId: next });
-            await this.enterRoll();
+          if (wasActive) {
+            this.room.activePlayerId = nextIfActive;
+            if (this.room.paused) {
+              this.broadcastState();
+              await this.persist();
+            } else if (nextIfActive) {
+              this.broadcastEvent({ kind: "turnPassed", playerId: nextIfActive });
+              await this.enterRoll();
+            } else {
+              this.broadcastState();
+              await this.persist();
+            }
           } else {
             this.broadcastState();
             await this.persist();

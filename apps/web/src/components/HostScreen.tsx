@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { type HostView } from "@chowka/shared";
 import { useCountdown, useGameSocket } from "../lib/useGameSocket";
 import { useAudio, usePhaseSound } from "../lib/useAudio";
+import { useTravelAnimation } from "../lib/useTravelAnimation";
 import { COLOR_THEME } from "../lib/colors";
 import { Board, Pockets } from "./Board";
 import { MuteButton } from "./MuteButton";
@@ -36,7 +37,7 @@ function SidePanel({ view, settleDice }: { view: HostView; settleDice: boolean }
       {(view.phase === "roll" || view.phase === "move" || view.phase === "resolution") && (
         <PhaseShell tone={view.phase === "move" ? "success" : "calm"} className="text-center">
           {view.currentRoll != null ? (
-            <ShellDice value={view.currentRoll} size="lg" animate={settleDice || view.phase === "move"} />
+            <ShellDice value={view.currentRoll} size="lg" animate={settleDice} />
           ) : (
             <div>
               <ShellDice value={null} size="lg" />
@@ -72,6 +73,11 @@ export function HostScreen({ code }: { code: string }) {
   const hostView = view?.role === "host" ? view : null;
   const seconds = useCountdown(hostView?.phaseEndsAt ?? null);
   const [settleDice, setSettleDice] = useState(false);
+  const travel = useTravelAnimation(
+    hostView?.lastMove,
+    hostView?.players ?? [],
+    hostView?.phase,
+  );
 
   usePhaseSound(hostView?.phase, play);
 
@@ -101,7 +107,7 @@ export function HostScreen({ code }: { code: string }) {
           play("home");
           break;
         case "gameOver":
-          play("victory");
+          play(msg.event.result.winnerId ? "victory" : "defeat");
           break;
         case "paused":
         case "resumed":
@@ -172,12 +178,24 @@ export function HostScreen({ code }: { code: string }) {
           <div className="grid gap-8 lg:grid-cols-[1.4fr_1fr]">
             <section>
               <div className="mx-auto max-w-2xl">
-                <Board players={hostView.players} activePlayerId={hostView.activePlayerId} />
+                <Board
+                  players={hostView.players}
+                  activePlayerId={hostView.activePlayerId}
+                  travel={travel}
+                />
                 <div className="mt-4">
                   <Pockets players={hostView.players} />
                 </div>
-                {seconds > 0 && (
+                {travel && (
+                  <p className="mt-2 text-center font-display text-lg text-warn">
+                    Moving {travel.to - travel.from} space{travel.to - travel.from === 1 ? "" : "s"}
+                  </p>
+                )}
+                {seconds > 0 && !travel && (
                   <p className="mt-3 text-center text-sm text-surface/50">{seconds}s</p>
+                )}
+                {seconds > 0 && travel && (
+                  <p className="mt-1 text-center text-sm text-surface/50">{seconds}s</p>
                 )}
               </div>
             </section>

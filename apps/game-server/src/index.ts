@@ -1,4 +1,4 @@
-import { generateRoomCode } from "@chowka/shared";
+import { ROOM_CODE_LENGTH, generateRoomCode } from "@chowka/shared";
 import { RoomDurableObject } from "./room";
 
 export { RoomDurableObject };
@@ -73,25 +73,32 @@ export default {
     }
 
     if (url.pathname === "/api/lobby" && request.method === "POST") {
-      const code = generateRoomCode();
-      const id = env.ROOM.idFromName(code);
-      const stub = env.ROOM.get(id);
-      const initRes = await stub.fetch(
-        new Request("https://room/internal/init", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ code }),
-        }),
-      );
-      if (!initRes.ok) {
-        return json({ error: "Failed to create lobby" }, 500, cors);
+      // Retry a few times so a rare code collision doesn't reuse a live room.
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const code = generateRoomCode();
+        const id = env.ROOM.idFromName(code);
+        const stub = env.ROOM.get(id);
+        const initRes = await stub.fetch(
+          new Request("https://room/internal/init", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ code }),
+          }),
+        );
+        if (!initRes.ok) continue;
+        const body = (await initRes.json().catch(() => null)) as
+          | { ok?: boolean; created?: boolean; code?: string }
+          | null;
+        if (body?.created && body.code === code) {
+          return json({ code }, 200, cors);
+        }
       }
-      return json({ code }, 200, cors);
+      return json({ error: "Failed to create lobby" }, 500, cors);
     }
 
     if (url.pathname === "/ws" && request.headers.get("Upgrade") === "websocket") {
       const code = url.searchParams.get("code")?.toUpperCase();
-      if (!code || code.length < 3) {
+      if (!code || code.length !== ROOM_CODE_LENGTH) {
         return json({ error: "Missing room code" }, 400, cors);
       }
       const id = env.ROOM.idFromName(code);

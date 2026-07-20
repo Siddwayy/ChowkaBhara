@@ -17,6 +17,9 @@ export const POCKET = -1;
  * Paths travel anticlockwise (red's first step is to the right). */
 export const COLORS = ["red", "blue", "green", "yellow"] as const;
 
+/** Pawn token shapes — picked in lobby alongside color. */
+export const PAWN_SHAPES = ["circle", "square", "star", "triangle"] as const;
+
 /** The 5 safe squares (marked with an X on the classic board): the 4
  * edge-middle home bases and the center. Pawns here cannot be captured and
  * may stack freely. */

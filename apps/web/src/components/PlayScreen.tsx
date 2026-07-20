@@ -1,17 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   COLORS,
-  CENTER_INDEX,
-  POCKET,
+  PAWN_SHAPES,
   oppositeColor,
   type Color,
+  type PawnShape,
   type PlayerView,
 } from "@chowka/shared";
 import { getOrCreatePlayerId } from "../lib/serverUrl";
 import { useCountdown, useGameSocket } from "../lib/useGameSocket";
 import { useAudio, usePhaseSound } from "../lib/useAudio";
+import { useTravelAnimation } from "../lib/useTravelAnimation";
 import { COLOR_THEME } from "../lib/colors";
-import { Board, Pockets } from "./Board";
+import { Board } from "./Board";
 import { MuteButton } from "./MuteButton";
 import { acknowledgeRules, hasAcknowledgedRules, RulesScreen } from "./RulesScreen";
 import { Scorecard } from "./Scorecard";
@@ -23,12 +24,6 @@ import {
   ShellDice,
   StatusStrip,
 } from "./ui";
-
-function pawnLabel(pos: number): string {
-  if (pos === POCKET || pos === 0) return "at base";
-  if (pos === CENTER_INDEX) return "home!";
-  return `step ${pos}/${CENTER_INDEX}`;
-}
 
 export function PlayScreen({
   code,
@@ -135,18 +130,18 @@ export function PlayScreen({
   }
 
   return (
-    <main className="mx-auto flex h-dvh max-h-dvh max-w-md flex-col overflow-hidden px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-[max(0.75rem,env(safe-area-inset-top))] sm:py-5">
+    <main className="mx-auto flex h-dvh max-h-dvh max-w-md flex-col overflow-hidden px-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-[max(0.75rem,env(safe-area-inset-top))] sm:py-5">
       <header className="flex shrink-0 items-center justify-between gap-3">
-        <div>
+        <div className="min-w-0">
           <p className="text-[10px] font-semibold uppercase tracking-wider text-o2 sm:text-xs">Room</p>
-          <p className="font-display text-xl font-bold tracking-wide text-surface sm:text-2xl">{code}</p>
+          <p className="truncate font-display text-xl font-bold tracking-wide text-surface sm:text-2xl">{code}</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2">
           {playerView?.phase === "lobby" && rulesOk && (
             <button
               type="button"
               onClick={() => setShowRules(true)}
-              className="rounded-full bg-surface/15 px-3 py-2 text-sm font-semibold text-surface"
+              className="min-h-11 rounded-full bg-surface/15 px-4 py-2.5 text-sm font-semibold text-surface"
             >
               Rules
             </button>
@@ -189,6 +184,10 @@ export function PlayScreen({
             play("tap");
             send({ type: "setColor", color: c });
           }}
+          onSetShape={(s) => {
+            play("tap");
+            send({ type: "setShape", shape: s });
+          }}
           onReady={(ready) => {
             play(ready ? "ready" : "unready");
             send({ type: "setReady", ready });
@@ -199,10 +198,13 @@ export function PlayScreen({
           }}
           onThrow={() => {
             threwSelf.current = true;
+            if (!send({ type: "throwShells" })) {
+              threwSelf.current = false;
+              return;
+            }
             setIsRolling(true);
             setSettleDice(false);
             play("roll");
-            send({ type: "throwShells" });
             if (typeof navigator !== "undefined" && navigator.vibrate) navigator.vibrate(30);
           }}
           onMove={(pawnIndex) => {
@@ -245,6 +247,7 @@ function PlayerBody({
   isRolling,
   settleDice,
   onSetColor,
+  onSetShape,
   onReady,
   onStart,
   onThrow,
@@ -262,6 +265,7 @@ function PlayerBody({
   isRolling: boolean;
   settleDice: boolean;
   onSetColor: (c: Color) => void;
+  onSetShape: (s: PawnShape) => void;
   onReady: (ready: boolean) => void;
   onStart: () => void;
   onThrow: () => void;
@@ -276,6 +280,12 @@ function PlayerBody({
   const activeName = view.players.find((p) => p.id === view.activePlayerId)?.name ?? "…";
   const me = view.players.find((p) => p.id === view.myPlayerId);
   const [confirmExit, setConfirmExit] = useState(false);
+  const travel = useTravelAnimation(view.lastMove, view.players, view.phase);
+
+  const selectable =
+    view.phase === "move" && view.isMyTurn && view.myValidMoves.length > 0
+      ? { playerId: view.myPlayerId, pawnIndexes: view.myValidMoves }
+      : null;
 
   if (view.phase === "lobby") {
     const connected = view.players.filter((p) => p.connected).length;
@@ -287,16 +297,21 @@ function PlayerBody({
     const otherColor = view.players.find(
       (p) => p.id !== view.myPlayerId && p.color,
     )?.color as Color | null | undefined;
+    const takenColors = new Set(
+      view.players
+        .filter((p) => p.id !== view.myPlayerId && p.color)
+        .map((p) => p.color as Color),
+    );
     const twoPlayer = expected === 2;
     const allowedOpposite = otherColor ? oppositeColor(otherColor) : null;
 
     return (
-      <div className="mt-4 min-h-0 flex-1 space-y-5 overflow-y-auto animate-fadeIn">
+      <div className="mt-3 min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain animate-fadeIn sm:mt-4 sm:space-y-5">
         <PhaseShell>
           <p className="text-center text-sm font-semibold uppercase tracking-wider text-o2">
             Share this code
           </p>
-          <p className="mt-2 text-center font-display text-5xl font-bold tracking-[0.2em] text-surface">
+          <p className="mt-2 text-center font-display text-4xl font-bold tracking-[0.2em] text-surface sm:text-5xl">
             {view.code}
           </p>
           <p className="mt-3 text-center text-surface/70">
@@ -306,7 +321,7 @@ function PlayerBody({
             href={hostUrl}
             target="_blank"
             rel="noreferrer"
-            className="mt-4 block text-center text-sm font-semibold text-warn underline"
+            className="mt-4 block min-h-11 py-2 text-center text-sm font-semibold text-warn underline"
           >
             Open TV display
           </a>
@@ -317,10 +332,10 @@ function PlayerBody({
             Pick your color
             {twoPlayer ? " (face-to-face seats)" : ""}
           </p>
-          <div className="grid grid-cols-4 gap-3">
+          <div className="grid grid-cols-4 gap-2 sm:gap-3">
             {COLORS.map((c) => {
               const theme = COLOR_THEME[c];
-              const taken = Boolean(otherColor && otherColor === c);
+              const taken = takenColors.has(c);
               // 2p: only the opposite of the other player (or any if alone).
               const blockedByFacing =
                 twoPlayer && otherColor != null && allowedOpposite != null && c !== allowedOpposite && c !== me?.color;
@@ -332,7 +347,7 @@ function PlayerBody({
                   type="button"
                   disabled={disabled}
                   onClick={() => onSetColor(c)}
-                  className={`flex aspect-square items-center justify-center rounded-2xl border-2 transition active:scale-95 disabled:opacity-25 ${
+                  className={`flex min-h-14 aspect-square items-center justify-center rounded-2xl border-2 transition active:scale-95 disabled:opacity-25 ${
                     mine ? "border-surface ring-2 ring-surface" : "border-transparent"
                   }`}
                   style={{ background: theme.hex }}
@@ -350,6 +365,39 @@ function PlayerBody({
         </div>
 
         <div>
+          <p className="mb-2 font-display text-sm font-semibold text-surface/70">
+            Pick your pawn
+          </p>
+          <div className="grid grid-cols-4 gap-2 sm:gap-3">
+            {PAWN_SHAPES.map((s) => {
+              const taken = view.players.some(
+                (p) => p.id !== view.myPlayerId && p.shape === s,
+              );
+              const mine = me?.shape === s;
+              const previewColor = (me?.color ?? "red") as Color;
+              const theme = COLOR_THEME[previewColor];
+              return (
+                <button
+                  key={s}
+                  type="button"
+                  disabled={taken}
+                  onClick={() => onSetShape(s)}
+                  className={`flex min-h-14 aspect-square flex-col items-center justify-center gap-0.5 rounded-2xl border-2 bg-surface/10 transition active:scale-95 disabled:opacity-25 ${
+                    mine ? "border-surface ring-2 ring-surface" : "border-surface/20"
+                  }`}
+                  aria-label={`${s}${taken ? " (taken)" : ""}`}
+                >
+                  <ShapePreview shape={s} fill={theme.hex} edge={theme.edge} />
+                  <span className="text-[10px] font-semibold uppercase tracking-wide text-surface/70">
+                    {s}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div>
           <p className="mb-2 font-display text-sm font-semibold text-surface/70">Players</p>
           <CrewList players={view.players} phase={view.phase} myPlayerId={view.myPlayerId} />
         </div>
@@ -360,10 +408,16 @@ function PlayerBody({
           <>
             <PrimaryButton
               variant={view.myReady ? "ghost" : "primary"}
-              disabled={!me?.color}
+              disabled={!me?.color || !me?.shape}
               onClick={() => onReady(!view.myReady)}
             >
-              {!me?.color ? "Pick a color first" : view.myReady ? "Ready — tap to cancel" : "Ready Up"}
+              {!me?.color
+                ? "Pick a color first"
+                : !me?.shape
+                  ? "Pick a pawn first"
+                  : view.myReady
+                    ? "Ready — tap to cancel"
+                    : "Ready Up"}
             </PrimaryButton>
 
             {view.isHost ? (
@@ -403,10 +457,9 @@ function PlayerBody({
   }
 
   // In-game phases: roll / move / resolution — fit in one phone viewport.
-  // Board takes leftover space; controls stay shrink-0 so shells aren't clipped
-  // by overflow-hidden + justify-end packing.
+  // Board fills leftover space as a square; controls stay shrink-0.
   return (
-    <div className="relative mt-2 flex min-h-0 flex-1 flex-col gap-2">
+    <div className="relative mt-1 flex min-h-0 flex-1 flex-col gap-1.5 sm:mt-2 sm:gap-2">
       <StatusStrip
         turnName={activeName}
         isMyTurn={view.isMyTurn}
@@ -414,12 +467,12 @@ function PlayerBody({
         seconds={view.isMyTurn && !view.paused && seconds > 0 ? seconds : null}
       />
 
-      <div className="mx-auto grid min-h-0 w-full flex-1 place-items-center overflow-hidden">
+      <div className="flex min-h-0 w-full flex-1 items-center justify-center overflow-hidden [container-type:size]">
         <div
-          className="aspect-square"
+          className="aspect-square shrink-0"
           style={{
-            width: "min(100%, 42dvh)",
-            height: "min(100%, 42dvh)",
+            width: "min(100cqw, 100cqh)",
+            height: "min(100cqw, 100cqh)",
             maxWidth: "100%",
             maxHeight: "100%",
           }}
@@ -428,16 +481,19 @@ function PlayerBody({
             players={view.players}
             activePlayerId={view.activePlayerId}
             orientFor={view.myColor}
-            className="!box-border !h-full !w-full !p-2 sm:!p-3"
+            className="!box-border !h-full !w-full !p-1.5 sm:!p-3"
+            selectable={selectable}
+            onPawnClick={onMove}
+            travel={travel}
           />
         </div>
       </div>
 
-      <div className="flex shrink-0 flex-col gap-2 overflow-visible">
+      <div className="flex shrink-0 flex-col gap-1.5 overflow-visible sm:gap-2">
         {view.phase === "roll" && (
-          <div className="space-y-2 overflow-visible">
+          <div className="space-y-1.5 overflow-visible sm:space-y-2">
             {(isRolling || view.isMyTurn) && (
-              <div className="flex justify-center overflow-visible py-1">
+              <div className="flex justify-center overflow-visible py-0.5">
                 <ShellDice
                   value={isRolling ? null : view.currentRoll}
                   size="sm"
@@ -464,107 +520,79 @@ function PlayerBody({
         )}
 
         {view.phase === "move" && (
-          <div className="space-y-2 overflow-visible">
+          <div className="space-y-1.5 overflow-visible sm:space-y-2">
+            <div className="flex justify-center overflow-visible py-0.5">
+              <ShellDice
+                value={view.currentRoll}
+                size="sm"
+                rolling={false}
+                animate={settleDice}
+              />
+            </div>
             {view.isMyTurn ? (
-              <>
-                <div className="flex justify-center overflow-visible py-1">
-                  <ShellDice
-                    value={view.currentRoll}
-                    size="sm"
-                    rolling={false}
-                    animate={settleDice}
+              view.myValidMoves.length > 0 ? (
+                <p className="text-center text-sm text-surface/70">
+                  Tap your pawn to move
+                </p>
+              ) : (
+                <>
+                  <Instruction
+                    compact
+                    title="No valid moves"
+                    subtitle="Nothing you can move with this roll."
+                    tone="talk"
                   />
-                </div>
-                {view.myValidMoves.length > 0 ? (
-                  <>
-                    <p className="text-center text-xs text-surface/70 sm:text-sm">Choose a pawn</p>
-                    <div className="grid grid-cols-2 gap-2">
-                      {(me?.pawns ?? []).map((pos, i) => {
-                        const valid = view.myValidMoves.includes(i);
-                        const theme = me?.color ? COLOR_THEME[me.color] : null;
-                        return (
-                          <button
-                            key={i}
-                            type="button"
-                            disabled={!valid}
-                            onClick={() => onMove(i)}
-                            className={`flex min-h-12 flex-col items-center justify-center rounded-xl border-2 px-2 py-2 font-display active:scale-[0.98] disabled:opacity-30 sm:min-h-14 sm:rounded-2xl sm:px-3 ${
-                              valid
-                                ? "border-surface/60 bg-surface/15 text-surface"
-                                : "border-surface/20 bg-surface/5 text-surface/50"
-                            }`}
-                          >
-                            <span className="flex items-center gap-1.5 text-sm font-bold sm:text-base">
-                              <span
-                                className="inline-block h-3 w-3 rounded-full ring-2 ring-white/40"
-                                style={{ background: theme?.hex ?? "#6B8499" }}
-                              />
-                              Pawn {i + 1}
-                            </span>
-                            <span className="text-[10px] opacity-75 sm:text-xs">{pawnLabel(pos)}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <Instruction
-                      compact
-                      title="No valid moves"
-                      subtitle="Nothing you can move with this roll."
-                      tone="talk"
-                    />
-                    <PrimaryButton variant="ink" className="!min-h-12 !py-2.5 !text-base" onClick={onSkip}>
-                      Skip Turn
-                    </PrimaryButton>
-                  </>
-                )}
-              </>
+                  <PrimaryButton variant="ink" className="!min-h-12 !py-2.5 !text-base" onClick={onSkip}>
+                    Skip Turn
+                  </PrimaryButton>
+                </>
+              )
             ) : (
-              <>
-                <div className="flex justify-center overflow-visible py-1">
-                  <ShellDice value={view.currentRoll} size="sm" animate={settleDice} />
-                </div>
-                <Instruction
-                  compact
-                  title={`${activeName} is moving`}
-                  subtitle={`Rolled a ${view.currentRoll ?? "?"}.`}
-                />
-              </>
+              <Instruction
+                compact
+                title={`${activeName} is moving`}
+                subtitle={`Rolled a ${view.currentRoll ?? "?"}.`}
+              />
             )}
           </div>
         )}
 
         {view.phase === "resolution" && (
-          <div className="space-y-2">
-            <Instruction compact title="…" subtitle="Resolving move" />
-            <Pockets players={view.players} />
+          <div className="space-y-1.5 sm:space-y-2">
+            <Instruction
+              compact
+              title={
+                travel
+                  ? `${travel.to - travel.from} space${travel.to - travel.from === 1 ? "" : "s"}`
+                  : "…"
+              }
+              subtitle="Watch the path"
+            />
           </div>
         )}
 
-        {/* Global controls */}
+        {/* Global controls — ≥44px touch targets */}
         <div className="flex shrink-0 items-center gap-2 pt-0.5">
           <button
             type="button"
             onClick={view.paused ? onResume : onPause}
-            className="flex-1 rounded-xl bg-surface/15 px-3 py-2 font-display text-xs font-semibold text-surface transition active:scale-[0.98] sm:rounded-2xl sm:py-2.5 sm:text-sm"
+            className="min-h-11 flex-1 rounded-xl bg-surface/15 px-3 py-2.5 font-display text-sm font-semibold text-surface transition active:scale-[0.98]"
           >
             {view.paused ? "Resume" : "Pause"}
           </button>
           {confirmExit ? (
-            <div className="flex flex-1 items-center gap-2">
+            <div className="flex min-w-0 flex-[1.4] items-center gap-2">
               <button
                 type="button"
                 onClick={onExit}
-                className="flex-1 rounded-xl bg-danger/80 px-3 py-2 font-display text-xs font-semibold text-white transition active:scale-[0.98] sm:rounded-2xl sm:py-2.5 sm:text-sm"
+                className="min-h-11 min-w-0 flex-1 rounded-xl bg-danger/80 px-2 py-2.5 font-display text-sm font-semibold text-white transition active:scale-[0.98]"
               >
-                Leave for good
+                Leave
               </button>
               <button
                 type="button"
                 onClick={() => setConfirmExit(false)}
-                className="rounded-xl bg-surface/15 px-3 py-2 font-display text-xs font-semibold text-surface sm:rounded-2xl sm:py-2.5 sm:text-sm"
+                className="min-h-11 shrink-0 rounded-xl bg-surface/15 px-3 py-2.5 font-display text-sm font-semibold text-surface"
               >
                 Cancel
               </button>
@@ -573,16 +601,16 @@ function PlayerBody({
             <button
               type="button"
               onClick={() => setConfirmExit(true)}
-              className="flex-1 rounded-xl bg-danger/20 px-3 py-2 font-display text-xs font-semibold text-danger-soft transition active:scale-[0.98] sm:rounded-2xl sm:py-2.5 sm:text-sm"
+              className="min-h-11 flex-1 rounded-xl bg-danger/20 px-3 py-2.5 font-display text-sm font-semibold text-danger-soft transition active:scale-[0.98]"
             >
-              Exit Game
+              Exit
             </button>
           )}
         </div>
       </div>
 
       {view.paused && (
-        <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-5 rounded-3xl bg-ink/85 p-6 text-center backdrop-blur-sm">
+        <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-5 rounded-3xl bg-ink/85 p-5 text-center backdrop-blur-sm sm:p-6">
           <div>
             <p className="font-display text-3xl font-bold text-surface">Paused</p>
             <p className="mt-2 text-surface/70">
@@ -595,5 +623,50 @@ function PlayerBody({
         </div>
       )}
     </div>
+  );
+}
+
+function ShapePreview({
+  shape,
+  fill,
+  edge,
+}: {
+  shape: PawnShape;
+  fill: string;
+  edge: string;
+}) {
+  return (
+    <svg width="28" height="28" viewBox="0 0 40 40" aria-hidden="true">
+      {shape === "circle" && (
+        <>
+          <circle cx="20" cy="20" r="16" fill={edge} />
+          <circle cx="20" cy="20" r="13.5" fill={fill} />
+        </>
+      )}
+      {shape === "square" && (
+        <>
+          <rect x="5" y="5" width="30" height="30" rx="4" fill={edge} />
+          <rect x="7.5" y="7.5" width="25" height="25" rx="3" fill={fill} />
+        </>
+      )}
+      {shape === "triangle" && (
+        <>
+          <path d="M20 4 L36 34 L4 34 Z" fill={edge} />
+          <path d="M20 9 L31.5 32 L8.5 32 Z" fill={fill} />
+        </>
+      )}
+      {shape === "star" && (
+        <>
+          <path
+            d="M20 3 L24 14 L36 14.2 L26.5 21.5 L29.5 33 L20 26.5 L10.5 33 L13.5 21.5 L4 14.2 L16 14 Z"
+            fill={edge}
+          />
+          <path
+            d="M20 6.5 L23.2 15.2 L32.5 15.4 L25.2 20.8 L27.5 29.5 L20 24.5 L12.5 29.5 L14.8 20.8 L7.5 15.4 L16.8 15.2 Z"
+            fill={fill}
+          />
+        </>
+      )}
+    </svg>
   );
 }

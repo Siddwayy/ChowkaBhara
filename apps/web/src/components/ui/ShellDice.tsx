@@ -51,7 +51,7 @@ export function ShellDice({
             ? (tick + i * 2 + (tick % 3)) % 2 === 0
             : i < settledOpen;
           return (
-            <Shell
+            <ShellIcon
               key={i}
               open={open}
               px={shellPx}
@@ -72,14 +72,14 @@ export function ShellDice({
   );
 }
 
-function Shell({
+export function ShellIcon({
   open,
-  px,
+  px = 22,
   className = "",
   delayMs = 0,
 }: {
   open: boolean;
-  px: number;
+  px?: number;
   className?: string;
   delayMs?: number;
 }) {

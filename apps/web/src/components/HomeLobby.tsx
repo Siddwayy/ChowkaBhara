@@ -11,7 +11,7 @@ function cleanName(raw: string): string {
 }
 
 const fieldClass =
-  "w-full rounded-2xl border-2 border-sky-soft/30 bg-surface px-4 py-4 font-display text-lg text-ink outline-none focus:border-o2";
+  "w-full rounded-2xl border-2 border-sky-soft/30 bg-surface px-4 py-3.5 font-display text-base text-ink outline-none focus:border-o2 sm:py-4 sm:text-lg";
 
 export function HomeLobby() {
   const [screen, setScreen] = useState<Screen>("menu");
@@ -82,15 +82,15 @@ export function HomeLobby() {
   }
 
   return (
-    <main className="relative mx-auto flex min-h-dvh max-w-md flex-col justify-center px-5 py-10 pb-[max(2.5rem,env(safe-area-inset-bottom))] pt-[max(2.5rem,env(safe-area-inset-top))]">
+    <main className="relative mx-auto flex min-h-dvh max-w-md flex-col justify-start px-[max(1.25rem,env(safe-area-inset-left))] pr-[max(1.25rem,env(safe-area-inset-right))] py-8 pb-[max(2rem,env(safe-area-inset-bottom))] pt-[max(2rem,env(safe-area-inset-top))] sm:justify-center sm:py-10">
       <div className="animate-fadeIn">
         <p className="font-display text-sm font-semibold uppercase tracking-widest text-o2">
           Party board game
         </p>
-        <h1 className="mt-2 font-display text-5xl font-bold tracking-tight text-surface animate-bob">
+        <h1 className="mt-2 font-display text-4xl font-bold tracking-tight text-surface animate-bob sm:text-5xl">
           CHOWKA BHARA
         </h1>
-        <p className="mt-4 max-w-sm text-lg leading-relaxed text-surface/80">
+        <p className="mt-3 max-w-sm text-base leading-relaxed text-surface/80 sm:mt-4 sm:text-lg">
           The classic cross-and-circle race. Throw the shells, chase your rivals home, and
           rush all four pawns to the center.
         </p>

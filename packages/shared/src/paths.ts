@@ -72,3 +72,18 @@ export function isSafeCell(coord: Coord): boolean {
 export function homeCoord(color: Color): Coord {
   return PATHS[color][0]!;
 }
+
+/**
+ * Coords visited when moving from→to along the player's path (includes
+ * destination; excludes the start cell the pawn leaves).
+ */
+export function pathStepCoords(color: Color, from: number, to: number): Coord[] {
+  const start = Math.max(0, from);
+  const end = Math.max(start, to);
+  const out: Coord[] = [];
+  for (let i = start + 1; i <= end; i++) {
+    const c = coordFor(color, i);
+    if (c) out.push(c);
+  }
+  return out;
+}

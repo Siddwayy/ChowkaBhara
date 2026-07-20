@@ -1,6 +1,8 @@
 import {
   BONUS_ROLLS,
   CENTER_INDEX,
+  INNER_RING_START,
+  ROLL_VALUES,
   ROOM_CODE_ALPHABET,
   ROOM_CODE_LENGTH,
 } from "./constants.js";
@@ -13,6 +15,9 @@ const OPPOSITE: Record<Color, Color> = {
   blue: "yellow",
   yellow: "blue",
 };
+
+/** Path indices that are safe for every color (homes + center). */
+const SAFE_PATH_INDICES = new Set([0, 4, 8, 12, CENTER_INDEX]);
 
 export function oppositeColor(color: Color): Color {
   return OPPOSITE[color];
@@ -35,6 +40,10 @@ export function isBonusRoll(roll: number): boolean {
   return BONUS_ROLLS.includes(roll);
 }
 
+export function isValidRoll(roll: number): boolean {
+  return (ROLL_VALUES as readonly number[]).includes(roll);
+}
+
 /**
  * Pocket (-1) is treated as sitting on home (index 0). Movement always leaves
  * the current cell, so a roll of N advances N steps along the path.
@@ -50,15 +59,14 @@ export function destForPawn(pos: number, roll: number): number {
 
 /**
  * True if another of this player's pawns already occupies `dest`.
- * Home (0) and center (24) may stack; every other cell is exclusive.
+ * Safe cells (path indices 0/4/8/12/24) may stack; every other cell is exclusive.
  */
 export function wouldLandOnOwnPawn(
   pawns: number[],
   pawnIndex: number,
   dest: number,
-  _color: Color,
 ): boolean {
-  if (dest === 0 || dest === CENTER_INDEX) return false;
+  if (SAFE_PATH_INDICES.has(dest)) return false;
   for (let i = 0; i < pawns.length; i++) {
     if (i === pawnIndex) continue;
     if (effectivePos(pawns[i]!) === dest) return true;
@@ -68,28 +76,25 @@ export function wouldLandOnOwnPawn(
 
 /**
  * Is moving this pawn by `roll` legal?
- *  - a finished pawn (on center) cannot move
- *  - the center needs an exact landing; overshooting past 24 is illegal
- *  - cannot land on a cell already occupied by your own pawn
+ *  - finished pawn (on center) cannot move
+ *  - center needs an exact landing; overshooting past 24 is illegal
+ *  - cannot enter the inner ring (index >= 16) until a capture has been made
+ *  - cannot land on a cell already occupied by your own pawn (except safe cells)
  */
 export function isMoveValid(
   pos: number,
   roll: number,
-  _hasCaptured: boolean = false,
+  hasCaptured: boolean = false,
   pawns?: number[],
   pawnIndex?: number,
-  color?: Color,
 ): boolean {
+  if (!isValidRoll(roll)) return false;
   const from = effectivePos(pos);
   if (from === CENTER_INDEX) return false;
   const dest = from + roll;
   if (dest > CENTER_INDEX) return false;
-  if (
-    pawns &&
-    pawnIndex != null &&
-    color &&
-    wouldLandOnOwnPawn(pawns, pawnIndex, dest, color)
-  ) {
+  if (!hasCaptured && dest >= INNER_RING_START) return false;
+  if (pawns && pawnIndex != null && wouldLandOnOwnPawn(pawns, pawnIndex, dest)) {
     return false;
   }
   return true;
@@ -100,11 +105,11 @@ export function computeValidMoves(
   pawns: number[],
   roll: number,
   hasCaptured: boolean,
-  color?: Color,
+  _color?: Color,
 ): number[] {
   const out: number[] = [];
   for (let i = 0; i < pawns.length; i++) {
-    if (isMoveValid(pawns[i]!, roll, hasCaptured, pawns, i, color)) out.push(i);
+    if (isMoveValid(pawns[i]!, roll, hasCaptured, pawns, i)) out.push(i);
   }
   return out;
 }
@@ -115,7 +120,7 @@ export function finishedCount(pawns: number[]): number {
 
 /** How far a player's furthest pawn has progressed (for ranking). */
 export function maxProgress(pawns: number[]): number {
-  return pawns.reduce((m, p) => Math.max(m, p), -1);
+  return pawns.reduce((m, p) => Math.max(m, Math.min(p, CENTER_INDEX)), -1);
 }
 
 export function generateRoomCode(random: () => number = Math.random): string {
