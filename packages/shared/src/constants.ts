@@ -42,7 +42,17 @@ export const ROLL_VALUES = [1, 2, 3, 4, 8] as const;
 export const BONUS_ROLLS: readonly number[] = [4, 8];
 
 /** How long the "resolution" pause lasts so moves/captures animate. */
-export const RESOLUTION_MS = 1200;
+export const RESOLUTION_MS = 1400;
+/** Per-cell travel animation step (client + used to size resolution). */
+export const TRAVEL_STEP_MS = 140;
+/** Brief pause after the pawn lands before the next turn. */
+export const TRAVEL_SETTLE_MS = 200;
+
+/** Resolution duration for a move that advances `steps` path cells. */
+export function resolutionMsForSteps(steps: number): number {
+  const n = Math.max(1, steps);
+  return n * TRAVEL_STEP_MS + TRAVEL_SETTLE_MS;
+}
 /** Auto-throw shells if the active player idles. */
 export const ROLL_TIMEOUT_MS = 20_000;
 /** Auto-move a random legal pawn if the active player idles. */

@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
-  RESOLUTION_MS,
+  TRAVEL_STEP_MS,
   type Color,
   type LastMove,
   type Phase,
@@ -74,27 +74,29 @@ export function useTravelAnimation(
     const from = Math.max(0, lastMove.from);
     const to = lastMove.to;
     const steps = Math.max(1, to - from);
-    // Pace steps to fill almost all of RESOLUTION_MS so short rolls don't
-    // finish early and leave a long frozen "Watch the path" gap.
-    const settleMs = 180;
-    const stepMs = Math.max(90, Math.floor((RESOLUTION_MS - settleMs) / steps));
+    const stepMs = TRAVEL_STEP_MS;
 
-    setTravel({
-      playerId: lastMove.playerId,
-      pawnIndex: lastMove.pawnIndex,
-      color: moverColor,
-      from,
-      to,
-      stepPos: from,
-      revealedSteps: 0,
-      landed: false,
-    });
-
-    let step = 0;
     const playerId = lastMove.playerId;
     const pawnIndex = lastMove.pawnIndex;
     const color = moverColor;
 
+    // First cell immediately — don't wait a full step before anything moves.
+    setTravel({
+      playerId,
+      pawnIndex,
+      color,
+      from,
+      to,
+      stepPos: from + 1,
+      revealedSteps: 1,
+      landed: steps === 1,
+    });
+
+    if (steps <= 1) {
+      return;
+    }
+
+    let step = 1;
     intervalRef.current = window.setInterval(() => {
       step += 1;
       if (step <= steps) {

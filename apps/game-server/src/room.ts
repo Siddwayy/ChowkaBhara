@@ -6,6 +6,8 @@ import {
   PAWNS_PER_PLAYER,
   RECONNECT_GRACE_MS,
   RESOLUTION_MS,
+  TRAVEL_SETTLE_MS,
+  resolutionMsForSteps,
   ROLL_TIMEOUT_MS,
   MOVE_TIMEOUT_MS,
   SKIP_TIMEOUT_MS,
@@ -599,14 +601,15 @@ export class RoomDurableObject implements DurableObject {
       to,
     });
 
-    await this.setPhase("resolution", RESOLUTION_MS);
+    const steps = Math.max(1, to - Math.max(0, from));
+    await this.setPhase("resolution", resolutionMsForSteps(steps));
   }
 
   private async doSkip(playerId: string): Promise<void> {
     if (this.room.activePlayerId !== playerId) return;
     this.room.bonusPending = false;
     this.room.lastMove = null;
-    await this.setPhase("resolution", RESOLUTION_MS);
+    await this.setPhase("resolution", TRAVEL_SETTLE_MS);
   }
 
   private nextConnectedAfter(id: string | null): string | null {
