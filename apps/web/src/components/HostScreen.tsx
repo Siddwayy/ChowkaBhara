@@ -153,6 +153,7 @@ export function HostScreen({ code }: { code: string }) {
           <p className="mt-6 text-center text-xl text-surface/80">
             {hostView.players.filter((p) => p.connected).length}
             {hostView.expectedPlayerCount != null ? ` / ${hostView.expectedPlayerCount}` : ""} joined ·{" "}
+            Board {hostView.boardMode} ·{" "}
             {hostView.players.filter((p) => p.connected && p.ready).length} ready
             {hostView.canStart ? " — ready to start!" : ""}
           </p>
@@ -181,10 +182,11 @@ export function HostScreen({ code }: { code: string }) {
                 <Board
                   players={hostView.players}
                   activePlayerId={hostView.activePlayerId}
+                  boardMode={hostView.boardMode}
                   travel={travel}
                 />
                 <div className="mt-4">
-                  <Pockets players={hostView.players} />
+                  <Pockets players={hostView.players} boardMode={hostView.boardMode} />
                 </div>
                 {travel && (
                   <p className="mt-2 text-center font-display text-lg text-warn">

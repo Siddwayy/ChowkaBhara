@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { MAX_PLAYERS, MIN_PLAYERS, PAWNS_PER_PLAYER } from "./constants.js";
 import {
+  BoardModeSchema,
   ClientRoleSchema,
   ColorSchema,
   GameOverResultSchema,
@@ -31,6 +32,10 @@ export const ClientMessageSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("setExpectedPlayers"),
     count: z.number().int().min(MIN_PLAYERS).max(MAX_PLAYERS),
+  }),
+  z.object({
+    type: z.literal("setBoardMode"),
+    mode: BoardModeSchema,
   }),
   z.object({
     type: z.literal("setReady"),

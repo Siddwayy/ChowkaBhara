@@ -2,9 +2,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   COLORS,
   PAWN_SHAPES,
-  coordFor,
+  coordForMode,
   destForPawn,
   oppositeColor,
+  type BoardMode,
   type Color,
   type Coord,
   type PawnShape,
@@ -31,15 +32,18 @@ export function PlayScreen({
   code,
   playerName,
   desiredMax,
+  desiredBoardMode,
 }: {
   code: string;
   playerName: string;
   desiredMax: number | null;
+  desiredBoardMode: BoardMode | null;
 }) {
   const playerId = useMemo(() => getOrCreatePlayerId(), []);
   const [rulesOk, setRulesOk] = useState(() => hasAcknowledgedRules(code));
   const [showRules, setShowRules] = useState(() => !hasAcknowledgedRules(code));
   const maxSent = useRef(false);
+  const modeSent = useRef(false);
 
   const { view, status, lastError, events, send, setLastError } = useGameSocket({
     code,
@@ -123,6 +127,23 @@ export function PlayScreen({
     send({ type: "setExpectedPlayers", count: desiredMax });
   }, [desiredMax, playerView?.isHost, playerView?.phase, playerView?.expectedPlayerCount, send]);
 
+  useEffect(() => {
+    if (desiredBoardMode == null || modeSent.current) return;
+    if (!playerView?.isHost || playerView.phase !== "lobby") return;
+    if (playerView.boardMode === desiredBoardMode) {
+      modeSent.current = true;
+      return;
+    }
+    modeSent.current = true;
+    send({ type: "setBoardMode", mode: desiredBoardMode });
+  }, [
+    desiredBoardMode,
+    playerView?.isHost,
+    playerView?.phase,
+    playerView?.boardMode,
+    send,
+  ]);
+
   function acceptRules() {
     acknowledgeRules(code);
     setRulesOk(true);
@@ -161,6 +182,15 @@ export function PlayScreen({
         </button>
       )}
 
+      {lastError && /already taken/i.test(lastError) && !playerView && (
+        <p className="mt-6 text-center text-sm text-surface/80">
+          Pick a different name and join again.{" "}
+          <a href="/" className="font-semibold text-o2 underline">
+            Back to lobby
+          </a>
+        </p>
+      )}
+
       {status !== "open" && !playerView && (
         <p className="mt-10 text-center text-surface/70">
           {status === "connecting" ? "Connecting…" : "Reconnecting…"}
@@ -169,10 +199,16 @@ export function PlayScreen({
 
       {showRules ? (
         <div className="mt-4 flex min-h-0 flex-1 flex-col overflow-y-auto">
-          <RulesScreen onDone={acceptRules} onBack={rulesOk ? () => setShowRules(false) : undefined} />
+          <RulesScreen
+            boardMode={playerView?.boardMode ?? "7x7"}
+            onDone={acceptRules}
+            onBack={rulesOk ? () => setShowRules(false) : undefined}
+          />
         </div>
       ) : !playerView ? (
-        <p className="mt-10 animate-pulseGlow text-center text-surface/70">Linking to room…</p>
+        lastError && /already taken/i.test(lastError) ? null : (
+          <p className="mt-10 animate-pulseGlow text-center text-surface/70">Linking to room…</p>
+        )
       ) : (
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <PlayerBody
@@ -307,7 +343,7 @@ function PlayerBody({
     const pos = me.pawns[pendingPawn];
     if (pos == null) return null;
     const dest = destForPawn(pos, view.currentRoll);
-    return coordFor(me.color, dest);
+    return coordForMode(view.boardMode, me.color, dest);
   })();
 
   const selectedPawn =
@@ -354,7 +390,7 @@ function PlayerBody({
             {view.code}
           </p>
           <p className="mt-3 text-center text-surface/70">
-            Players: {connected} / {expected ?? "…"}
+            Players: {connected} / {expected ?? "…"} · Board: {view.boardMode}
           </p>
           <a
             href={hostUrl}
@@ -576,6 +612,7 @@ function PlayerBody({
             players={view.players}
             activePlayerId={view.activePlayerId}
             orientFor={view.myColor}
+            boardMode={view.boardMode}
             className="!box-border !h-full !w-full !p-1.5 sm:!p-3"
             selectable={selectable}
             onPawnClick={handlePawnClick}
@@ -685,43 +722,53 @@ function PlayerBody({
 function ShapePreview({
   shape,
   fill,
-  edge,
 }: {
   shape: PawnShape;
   fill: string;
   edge: string;
 }) {
+  const OUTLINE = "#000000";
   return (
     <svg width="28" height="28" viewBox="0 0 40 40" aria-hidden="true">
       {shape === "circle" && (
-        <>
-          <circle cx="20" cy="20" r="16" fill={edge} />
-          <circle cx="20" cy="20" r="13.5" fill={fill} />
-        </>
+        <circle
+          cx="20"
+          cy="20"
+          r="12"
+          fill={fill}
+          stroke={OUTLINE}
+          strokeWidth="2.5"
+        />
       )}
       {shape === "square" && (
-        <>
-          <rect x="5" y="5" width="30" height="30" rx="4" fill={edge} />
-          <rect x="7.5" y="7.5" width="25" height="25" rx="3" fill={fill} />
-        </>
+        <rect
+          x="8"
+          y="8"
+          width="24"
+          height="24"
+          rx="3.5"
+          fill={fill}
+          stroke={OUTLINE}
+          strokeWidth="2.5"
+        />
       )}
       {shape === "triangle" && (
-        <>
-          <path d="M20 4 L36 34 L4 34 Z" fill={edge} />
-          <path d="M20 9 L31.5 32 L8.5 32 Z" fill={fill} />
-        </>
+        <path
+          d="M20 8 L32 33 L8 33 Z"
+          fill={fill}
+          stroke={OUTLINE}
+          strokeWidth="2.5"
+          strokeLinejoin="round"
+        />
       )}
       {shape === "star" && (
-        <>
-          <path
-            d="M20 3 L24 14 L36 14.2 L26.5 21.5 L29.5 33 L20 26.5 L10.5 33 L13.5 21.5 L4 14.2 L16 14 Z"
-            fill={edge}
-          />
-          <path
-            d="M20 6.5 L23.2 15.2 L32.5 15.4 L25.2 20.8 L27.5 29.5 L20 24.5 L12.5 29.5 L14.8 20.8 L7.5 15.4 L16.8 15.2 Z"
-            fill={fill}
-          />
-        </>
+        <path
+          d="M20 4 L24.2 15 L36 15.3 L26.5 22.5 L29.8 34 L20 27.5 L10.2 34 L13.5 22.5 L4 15.3 L15.8 15 Z"
+          fill={fill}
+          stroke={OUTLINE}
+          strokeWidth="2.25"
+          strokeLinejoin="round"
+        />
       )}
     </svg>
   );

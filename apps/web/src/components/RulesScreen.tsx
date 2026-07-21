@@ -1,13 +1,15 @@
 import {
-  BOARD_SIZE,
   COLORS,
-  PATHS,
-  homeCoord,
-  isSafeCell,
+  getBoardConfig,
+  homeCoordMode,
+  isSafeCellMode,
+  type BoardMode,
   type Color,
 } from "@chowka/shared";
 import { COLOR_THEME } from "../lib/colors";
 import { zoneBaseFill } from "../lib/boardZones";
+import { InnerEntryArrow } from "./InnerEntryArrow";
+import { SafeHouse } from "./SafeHouse";
 import { PrimaryButton, ShellIcon } from "./ui";
 
 const GAME_LOOP = [
@@ -21,7 +23,7 @@ const GAME_LOOP = [
   },
   {
     title: "Capture",
-    body: "Land on an opponent (off a safe X) → they return home; you roll again.",
+    body: "Land on an opponent (off a safe house) → they return home; you roll again.",
   },
   {
     title: "Bonus",
@@ -34,21 +36,23 @@ const GAME_LOOP = [
 ];
 
 const SHELL_SCORES = [1, 2, 3, 4, 8] as const;
-const CENTER_RC = (BOARD_SIZE - 1) / 2;
 
 function cellKey(r: number, c: number): string {
   return `${r}-${c}`;
 }
 
-/** Static 7×7 board with red's spiral path — teaching diagram only. */
-function RulesPathBoard() {
-  const route = PATHS.red;
+/** Teaching diagram for the active board mode (red's path). */
+function RulesPathBoard({ boardMode }: { boardMode: BoardMode }) {
+  const cfg = getBoardConfig(boardMode);
+  const BOARD_SIZE = cfg.boardSize;
+  const CENTER_RC = (BOARD_SIZE - 1) / 2;
+  const route = cfg.paths.red;
   const theme = COLOR_THEME.red;
   const cell = 100 / BOARD_SIZE;
 
   const homeByCell = new Map<string, Color>();
   for (const color of COLORS) {
-    const [r, c] = homeCoord(color);
+    const [r, c] = homeCoordMode(boardMode, color);
     homeByCell.set(cellKey(r, c), color);
   }
 
@@ -63,6 +67,9 @@ function RulesPathBoard() {
       cells.push({ r, c });
     }
   }
+
+  const middle = cfg.middleEntryJumps.red;
+  const inner = cfg.innerEntryJumps?.red;
 
   return (
     <div
@@ -90,17 +97,12 @@ function RulesPathBoard() {
             }}
           >
             {cells.map(({ r, c }) => {
-              const safe = isSafeCell([r, c]);
+              const safe = isSafeCellMode(boardMode, [r, c]);
               const isCenter = r === CENTER_RC && c === CENTER_RC;
               const homeColor = homeByCell.get(cellKey(r, c)) ?? null;
               const homeTheme = homeColor ? COLOR_THEME[homeColor] : null;
 
-              let crossColor = "#1a1208";
-              if (isCenter) crossColor = "#B8860B";
-              else if (homeTheme) crossColor = homeTheme.hex;
-              else if (safe) crossColor = "#f0e0c4";
-
-              const bg = zoneBaseFill(r, c, safe, isCenter);
+              const bg = zoneBaseFill(r, c, safe, isCenter, boardMode);
 
               return (
                 <div
@@ -116,33 +118,30 @@ function RulesPathBoard() {
                   }}
                 >
                   {safe && (
-                    <svg viewBox="0 0 100 100" className="h-[82%] w-[82%]">
-                      <line
-                        x1="14"
-                        y1="14"
-                        x2="86"
-                        y2="86"
-                        stroke={crossColor}
-                        strokeWidth={isCenter ? 7.5 : 6}
-                        strokeLinecap="round"
-                      />
-                      <line
-                        x1="86"
-                        y1="14"
-                        x2="14"
-                        y2="86"
-                        stroke={crossColor}
-                        strokeWidth={isCenter ? 7.5 : 6}
-                        strokeLinecap="round"
-                      />
-                    </svg>
+                    <SafeHouse
+                      color={homeTheme ? homeTheme.hex : "#000000"}
+                      heavy={isCenter}
+                    />
                   )}
                 </div>
               );
             })}
           </div>
 
-          {/* One filled shaft+head per step — line and arrow are the same shape */}
+          <InnerEntryArrow
+            from={middle.from}
+            to={middle.to}
+            boardSize={BOARD_SIZE}
+            inset={0.18}
+          />
+          {inner && (
+            <InnerEntryArrow
+              from={inner.from}
+              to={inner.to}
+              boardSize={BOARD_SIZE}
+            />
+          )}
+
           <svg
             viewBox="0 0 100 100"
             className="pointer-events-none absolute inset-0 z-[1] h-full w-full"
@@ -184,9 +183,9 @@ function integratedArrowPath(
   const tipX = x1 - ux * endPad;
   const tipY = y1 - uy * endPad;
 
-  const halfW = 1.05;
-  const headLen = 3.4;
-  const headHalf = 2.15;
+  const halfW = Math.min(1.15, len * 0.12);
+  const headLen = Math.min(2.4, len * 0.38);
+  const headHalf = halfW * 2.1;
   const neckX = tipX - ux * headLen;
   const neckY = tipY - uy * headLen;
 
@@ -208,17 +207,9 @@ function integratedArrowPath(
 
 function ShellThrowGuide() {
   return (
-    <div className="mt-3 space-y-3">
-      <div className="flex flex-wrap items-center gap-4 rounded-xl bg-ink/5 px-3 py-2">
-        <span className="flex items-center gap-1.5 text-xs text-ink-soft">
-          <ShellIcon open px={18} /> face up (mouth open)
-        </span>
-        <span className="flex items-center gap-1.5 text-xs text-ink-soft">
-          <ShellIcon open={false} px={18} /> face down (closed)
-        </span>
-      </div>
+    <div className="mt-3 space-y-2">
       <p className="text-xs leading-relaxed text-ink-soft">
-        Count mouth-up shells for your roll. All four face down scores{" "}
+        Four cowries. Mouth-up count is your move — except all face down scores{" "}
         <strong className="text-ink">8</strong>.
       </p>
       <ul className="space-y-1.5">
@@ -272,19 +263,21 @@ export function acknowledgeRules(code: string): void {
 export function RulesScreen({
   onDone,
   onBack,
+  boardMode = "7x7",
 }: {
   onDone: () => void;
   onBack?: () => void;
+  boardMode?: BoardMode;
 }) {
   return (
     <div className="animate-fadeIn flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain pb-1">
       <h2 className="font-display text-3xl font-bold text-surface">How to play</h2>
       <p className="mt-1 text-sm text-surface/70">
-        Chowka Bhara — an ancient cross-and-circle race game.
+        Chowka Bhara — {boardMode} board. An ancient cross-and-circle race game.
       </p>
 
       <div className="mt-5">
-        <RulesPathBoard />
+        <RulesPathBoard boardMode={boardMode} />
         <p className="mt-3 text-center text-sm leading-relaxed text-surface/75">
           Example path from the bottom home (red). Each color starts at their own
           edge-middle home and spirals the same way into the golden center.

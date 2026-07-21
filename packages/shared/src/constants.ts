@@ -21,7 +21,7 @@ export const COLORS = ["red", "blue", "green", "yellow"] as const;
 export const PAWN_SHAPES = ["circle", "square", "star", "triangle"] as const;
 
 /**
- * Safe squares (marked with an X): 4 edge-middle home bases, 4 inner-corner
+ * Safe squares (marked with a house): 4 edge-middle home bases, 4 inner-corner
  * safes, and the center. Pawns here cannot be captured and may stack freely.
  */
 export const SAFE_CELLS: readonly (readonly [number, number])[] = [

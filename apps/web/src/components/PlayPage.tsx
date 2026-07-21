@@ -1,20 +1,24 @@
 import { useMemo } from "react";
-import { MAX_PLAYERS, MIN_PLAYERS } from "@chowka/shared";
+import { isBoardMode, MAX_PLAYERS, MIN_PLAYERS, type BoardMode } from "@chowka/shared";
 import { PlayScreen } from "./PlayScreen";
 
 export function PlayPage() {
-  const { code, name, max } = useMemo(() => {
-    if (typeof window === "undefined") return { code: "", name: "", max: null };
+  const { code, name, max, mode } = useMemo(() => {
+    if (typeof window === "undefined") {
+      return { code: "", name: "", max: null, mode: null as BoardMode | null };
+    }
     const params = new URLSearchParams(window.location.search);
     const rawMax = Number(params.get("max"));
     const max =
       Number.isFinite(rawMax) && rawMax >= MIN_PLAYERS && rawMax <= MAX_PLAYERS
         ? rawMax
         : null;
+    const rawMode = params.get("mode");
     return {
       code: params.get("code")?.toUpperCase() ?? "",
       name: (params.get("name") ?? "").trim().slice(0, 16),
       max,
+      mode: isBoardMode(rawMode) ? rawMode : null,
     };
   }, []);
 
@@ -31,5 +35,12 @@ export function PlayPage() {
     );
   }
 
-  return <PlayScreen code={code} playerName={name} desiredMax={max} />;
+  return (
+    <PlayScreen
+      code={code}
+      playerName={name}
+      desiredMax={max}
+      desiredBoardMode={mode}
+    />
+  );
 }

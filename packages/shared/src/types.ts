@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { COLORS, PAWN_SHAPES } from "./constants.js";
+import { BOARD_MODES } from "./boardConfig.js";
 
 export const PhaseSchema = z.enum([
   "lobby",
@@ -19,6 +20,9 @@ export type Color = z.infer<typeof ColorSchema>;
 export const PawnShapeSchema = z.enum(PAWN_SHAPES);
 export type PawnShape = z.infer<typeof PawnShapeSchema>;
 
+export const BoardModeSchema = z.enum(BOARD_MODES);
+export type { BoardMode } from "./boardConfig.js";
+
 export const PlayerPublicSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -27,7 +31,7 @@ export const PlayerPublicSchema = z.object({
   color: ColorSchema.nullable(),
   shape: PawnShapeSchema.nullable().optional().default(null),
   ready: z.boolean().optional().default(false),
-  /** Pawn track positions, length 4: -1 pocket .. 48 center. */
+  /** Pawn track positions, length 4: -1 pocket .. centerIndex. */
   pawns: z.array(z.number()),
   hasCaptured: z.boolean().optional().default(false),
   finishedCount: z.number().optional().default(0),
@@ -71,6 +75,7 @@ const sharedViewFields = {
   phaseEndsAt: z.number().nullable(),
   canStart: z.boolean().optional().default(false),
   expectedPlayerCount: z.number().nullable().optional().default(null),
+  boardMode: BoardModeSchema.optional().default("7x7"),
   gameOver: GameOverResultSchema.nullable().optional().default(null),
   paused: z.boolean().optional().default(false),
   pausedByName: z.string().nullable().optional().default(null),

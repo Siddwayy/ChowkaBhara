@@ -1,11 +1,11 @@
 import {
-  BOARD_SIZE,
-  CENTER_INDEX,
   COLORS,
-  coordFor,
-  homeCoord,
-  isSafeCell,
-  pathStepCoords,
+  coordForMode,
+  getBoardConfig,
+  homeCoordMode,
+  isSafeCellMode,
+  pathStepCoordsMode,
+  type BoardMode,
   type Color,
   type Coord,
   type PawnShape,
@@ -14,8 +14,8 @@ import {
 import { COLOR_THEME } from "../lib/colors";
 import { zoneBaseFill } from "../lib/boardZones";
 import type { TravelAnim } from "../lib/useTravelAnimation";
-
-const CENTER_RC = (BOARD_SIZE - 1) / 2;
+import { InnerEntryArrows } from "./InnerEntryArrow";
+import { SafeHouse } from "./SafeHouse";
 
 interface TokenRef {
   key: string;
@@ -60,6 +60,7 @@ export function Board({
   players,
   activePlayerId,
   orientFor = null,
+  boardMode = "7x7",
   className = "",
   selectable = null,
   onPawnClick,
@@ -72,6 +73,7 @@ export function Board({
   activePlayerId?: string | null;
   /** Phone view: rotate so this player's home faces the bottom of the screen. */
   orientFor?: Color | null;
+  boardMode?: BoardMode;
   className?: string;
   /** Pawns that can be tapped to move (your valid moves). */
   selectable?: { playerId: string; pawnIndexes: number[] } | null;
@@ -85,6 +87,10 @@ export function Board({
   /** Confirm move by tapping the highlighted destination. */
   onDestClick?: () => void;
 }) {
+  const cfg = getBoardConfig(boardMode);
+  const BOARD_SIZE = cfg.boardSize;
+  const CENTER_INDEX = cfg.centerIndex;
+  const CENTER_RC = (BOARD_SIZE - 1) / 2;
   const rotation = orientFor ? ORIENT_DEG[orientFor] : 0;
   const livePlayers = players.filter((p) => !p.left);
   const activeColors = new Set(
@@ -98,13 +104,15 @@ export function Board({
   const homeByCell = new Map<string, Color>();
   for (const color of COLORS) {
     if (!activeColors.has(color)) continue;
-    const [r, c] = homeCoord(color);
+    const [r, c] = homeCoordMode(boardMode, color);
     homeByCell.set(cellKey(r, c), color);
   }
 
   // Path cells for travel highlight
   const pathCoords =
-    travel != null ? pathStepCoords(travel.color, travel.from, travel.to) : [];
+    travel != null
+      ? pathStepCoordsMode(boardMode, travel.color, travel.from, travel.to)
+      : [];
   const trailKeys = new Set<string>();
   const currentKey =
     travel && travel.revealedSteps > 0 && pathCoords[travel.revealedSteps - 1]
@@ -143,7 +151,9 @@ export function Board({
         displayPos = travel.stepPos;
       }
       const coord =
-        displayPos < 0 ? homeCoord(color) : coordFor(color, displayPos);
+        displayPos < 0
+          ? homeCoordMode(boardMode, color)
+          : coordForMode(boardMode, color, displayPos);
       if (!coord) return;
       const ref: TokenRef = {
         key: `${p.id}-${i}`,
@@ -220,7 +230,7 @@ export function Board({
             }}
           >
             {cells.map(({ r, c }) => {
-              const safe = isSafeCell([r, c]);
+              const safe = isSafeCellMode(boardMode, [r, c]);
               const isCenter = r === CENTER_RC && c === CENTER_RC;
               const homeColor = homeByCell.get(cellKey(r, c)) ?? null;
               const homeTheme = homeColor ? COLOR_THEME[homeColor] : null;
@@ -232,12 +242,7 @@ export function Board({
               const isDestLand = travel?.landed && destKey === k;
               const isPreviewDest = previewKey === k;
 
-              let crossColor = "#1a1208";
-              if (isCenter) crossColor = "#B8860B";
-              else if (homeTheme) crossColor = homeTheme.hex;
-              else if (safe) crossColor = "#f0e0c4";
-
-              let bg = zoneBaseFill(r, c, safe, isCenter);
+              let bg = zoneBaseFill(r, c, safe, isCenter, boardMode);
               if (isDestLand && travelTheme) {
                 bg = `linear-gradient(180deg, ${travelTheme.hex}aa 0%, ${travelTheme.hex}66 100%)`;
               } else if (isCurrent && travelTheme) {
@@ -271,11 +276,23 @@ export function Board({
                     boxShadow: travelRing ?? centerGlow,
                   }}
                 >
-                  {safe && <SafeCross color={crossColor} heavy={isCenter} />}
+                  {safe && (
+                    <SafeHouse
+                      color={homeTheme ? homeTheme.hex : "#000000"}
+                      heavy={isCenter}
+                      rotation={rotation}
+                    />
+                  )}
                 </div>
               );
             })}
           </div>
+
+          {/* Outer→middle and middle→inner entry arrows per color in play */}
+          <InnerEntryArrows
+            colors={COLORS.filter((c) => activeColors.has(c))}
+            boardMode={boardMode}
+          />
 
           {/* Pawns — selectable ones receive clicks */}
           <div className="absolute inset-0 z-[2]">
@@ -334,6 +351,7 @@ export function Board({
                         tokenKey={t.key}
                         finished={finished}
                         selected={isSelected}
+                        rotation={rotation}
                       />
                     </div>
                   </div>
@@ -366,32 +384,6 @@ export function Board({
   );
 }
 
-function SafeCross({ color, heavy = false }: { color: string; heavy?: boolean }) {
-  const stroke = heavy ? 7.5 : 6;
-  return (
-    <svg viewBox="0 0 100 100" className="h-[82%] w-[82%]" aria-hidden="true">
-      <line
-        x1="14"
-        y1="14"
-        x2="86"
-        y2="86"
-        stroke={color}
-        strokeWidth={stroke}
-        strokeLinecap="round"
-      />
-      <line
-        x1="86"
-        y1="14"
-        x2="14"
-        y2="86"
-        stroke={color}
-        strokeWidth={stroke}
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-
 const SELECT_STROKE = "#2ec4b6";
 
 function PawnToken({
@@ -400,15 +392,23 @@ function PawnToken({
   tokenKey,
   finished,
   selected = false,
+  rotation = 0,
 }: {
   color: Color;
   shape: PawnShape;
   tokenKey: string;
   finished?: boolean;
   selected?: boolean;
+  /** Board rotation (deg) — cancelled for oriented shapes so they stay upright. */
+  rotation?: number;
 }) {
   const theme = COLOR_THEME[color];
-  const gradId = `pawn-face-${tokenKey}`;
+  const OUTLINE = "#000000";
+  void tokenKey;
+  // Triangles (and stars) have a clear "up"; undo board seat rotation.
+  const keepUpright = shape === "triangle" || shape === "star";
+  const upright =
+    keepUpright && rotation ? { transform: `rotate(${-rotation}deg)` } : undefined;
   return (
     <div
       className="relative h-full w-full"
@@ -416,21 +416,15 @@ function PawnToken({
         filter: finished
           ? `drop-shadow(0 0 6px ${theme.hex})`
           : "drop-shadow(0 2px 3px rgba(26,18,8,0.45))",
+        ...upright,
       }}
     >
       <svg viewBox="0 0 40 40" className="h-full w-full" aria-hidden="true">
-        <defs>
-          <radialGradient id={gradId} cx="35%" cy="30%" r="70%">
-            <stop offset="0%" stopColor={theme.hex} stopOpacity="1" />
-            <stop offset="70%" stopColor={theme.hex} />
-            <stop offset="100%" stopColor={theme.edge} />
-          </radialGradient>
-        </defs>
         {selected && shape === "circle" && (
           <circle
             cx="20"
             cy="20"
-            r="19.25"
+            r="16.75"
             fill="none"
             stroke={SELECT_STROKE}
             strokeWidth="2.75"
@@ -438,11 +432,11 @@ function PawnToken({
         )}
         {selected && shape === "square" && (
           <rect
-            x="1.5"
-            y="1.5"
-            width="37"
-            height="37"
-            rx="6"
+            x="4.5"
+            y="4.5"
+            width="31"
+            height="31"
+            rx="5"
             fill="none"
             stroke={SELECT_STROKE}
             strokeWidth="2.75"
@@ -450,7 +444,7 @@ function PawnToken({
         )}
         {selected && shape === "triangle" && (
           <path
-            d="M20 1.5 L38.5 36.5 L1.5 36.5 Z"
+            d="M20 5 L34.5 34.5 L5.5 34.5 Z"
             fill="none"
             stroke={SELECT_STROKE}
             strokeWidth="2.75"
@@ -467,38 +461,44 @@ function PawnToken({
           />
         )}
         {shape === "circle" && (
-          <>
-            <circle cx="20" cy="20" r="18.5" fill={theme.edge} />
-            <circle cx="20" cy="20" r="16.5" fill={`url(#${gradId})`} />
-            <ellipse cx="14" cy="12" rx="5" ry="3.2" fill="rgba(255,255,255,0.35)" />
-          </>
+          <circle
+            cx="20"
+            cy="20"
+            r="14"
+            fill={theme.hex}
+            stroke={OUTLINE}
+            strokeWidth="2.5"
+          />
         )}
         {shape === "square" && (
-          <>
-            <rect x="3" y="3" width="34" height="34" rx="5" fill={theme.edge} />
-            <rect x="5.5" y="5.5" width="29" height="29" rx="4" fill={`url(#${gradId})`} />
-            <ellipse cx="14" cy="13" rx="4.5" ry="3" fill="rgba(255,255,255,0.35)" />
-          </>
+          <rect
+            x="7"
+            y="7"
+            width="26"
+            height="26"
+            rx="4"
+            fill={theme.hex}
+            stroke={OUTLINE}
+            strokeWidth="2.5"
+          />
         )}
         {shape === "triangle" && (
-          <>
-            <path d="M20 3 L37 35 L3 35 Z" fill={theme.edge} />
-            <path d="M20 8 L33 33 L7 33 Z" fill={`url(#${gradId})`} />
-            <ellipse cx="17" cy="18" rx="3.5" ry="2.4" fill="rgba(255,255,255,0.35)" />
-          </>
+          <path
+            d="M20 8 L32 33 L8 33 Z"
+            fill={theme.hex}
+            stroke={OUTLINE}
+            strokeWidth="2.5"
+            strokeLinejoin="round"
+          />
         )}
         {shape === "star" && (
-          <>
-            <path
-              d="M20 2.5 L24.5 14.2 L37 14.5 L27 22.2 L30.5 34.5 L20 27.5 L9.5 34.5 L13 22.2 L3 14.5 L15.5 14.2 Z"
-              fill={theme.edge}
-            />
-            <path
-              d="M20 6 L23.6 15.5 L33.5 15.7 L25.5 21.8 L28.2 31.5 L20 26 L11.8 31.5 L14.5 21.8 L6.5 15.7 L16.4 15.5 Z"
-              fill={`url(#${gradId})`}
-            />
-            <ellipse cx="17" cy="14" rx="3.2" ry="2.2" fill="rgba(255,255,255,0.35)" />
-          </>
+          <path
+            d="M20 4 L24.2 15 L36 15.3 L26.5 22.5 L29.8 34 L20 27.5 L10.2 34 L13.5 22.5 L4 15.3 L15.8 15 Z"
+            fill={theme.hex}
+            stroke={OUTLINE}
+            strokeWidth="2.25"
+            strokeLinejoin="round"
+          />
         )}
       </svg>
     </div>
@@ -506,7 +506,14 @@ function PawnToken({
 }
 
 /** Small legend of each player's pocket (un-entered) and finished pawns. */
-export function Pockets({ players }: { players: PlayerPublic[] }) {
+export function Pockets({
+  players,
+  boardMode = "7x7",
+}: {
+  players: PlayerPublic[];
+  boardMode?: BoardMode;
+}) {
+  const center = getBoardConfig(boardMode).centerIndex;
   return (
     <div className="flex flex-wrap gap-2">
       {players
@@ -514,7 +521,7 @@ export function Pockets({ players }: { players: PlayerPublic[] }) {
         .map((p) => {
           const theme = COLOR_THEME[p.color as Color];
           const atBase = p.pawns.filter((x) => x < 0).length;
-          const home = p.pawns.filter((x) => x === CENTER_INDEX).length;
+          const home = p.pawns.filter((x) => x === center).length;
           return (
             <div
               key={p.id}

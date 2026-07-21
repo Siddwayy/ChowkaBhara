@@ -54,9 +54,10 @@ export function CrewList({
           >
             <span className="flex items-center gap-2.5 font-display font-medium text-surface">
               <span
-                className="inline-flex h-5 w-5 items-center justify-center ring-2 ring-white/40"
+                className="inline-flex h-5 w-5 items-center justify-center"
                 style={{
                   background: theme?.hex ?? "#6B8499",
+                  border: "1.5px solid #000000",
                   borderRadius:
                     p.shape === "square"
                       ? "4px"

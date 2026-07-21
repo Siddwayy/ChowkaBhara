@@ -1,5 +1,4 @@
 import {
-  CENTER_INDEX,
   COLORS,
   MAX_PLAYERS,
   MIN_PLAYERS,
@@ -11,15 +10,18 @@ import {
   MOVE_TIMEOUT_MS,
   SKIP_TIMEOUT_MS,
   ClientMessageSchema,
-  coordFor,
   computeValidMoves,
+  coordForMode,
   destForPawn,
   finishedCount,
+  getBoardConfig,
+  isBoardMode,
   isBonusRoll,
-  isSafeCell,
+  isSafeCellMode,
   maxProgress,
   oppositeColor,
   rollShells,
+  type BoardMode,
   type ClientMessage,
   type ClientRole,
   type Color,
@@ -63,6 +65,7 @@ interface RoomState {
   bonusPending: boolean;
   lastMove: LastMove | null;
   expectedPlayerCount: number | null;
+  boardMode: BoardMode;
   hostPlayerId: string | null;
   phaseEndsAt: number | null;
   gameOver: GameOverResult | null;
@@ -88,6 +91,7 @@ function emptyRoom(code: string): RoomState {
     bonusPending: false,
     lastMove: null,
     expectedPlayerCount: MIN_PLAYERS,
+    boardMode: "7x7",
     hostPlayerId: null,
     phaseEndsAt: null,
     gameOver: null,
@@ -122,6 +126,7 @@ function normalizeRoom(stored: RoomState): RoomState {
     ...base,
     ...stored,
     expectedPlayerCount: stored.expectedPlayerCount ?? MIN_PLAYERS,
+    boardMode: isBoardMode(stored.boardMode) ? stored.boardMode : "7x7",
     paused: stored.paused ?? false,
     pausedById: stored.pausedById ?? null,
     hostPlayerId,
@@ -185,6 +190,15 @@ export class RoomDurableObject implements DurableObject {
       if (p.color) set.add(p.color);
     }
     return set;
+  }
+
+  /** Case-insensitive; ignores left players and optionally one seat (self). */
+  private isNameTaken(name: string, exceptId?: string): boolean {
+    const key = name.trim().toLowerCase();
+    if (!key) return false;
+    return this.room.players.some(
+      (p) => !p.left && p.id !== exceptId && p.name.trim().toLowerCase() === key,
+    );
   }
 
   private firstFreeColor(): Color | null {
@@ -282,10 +296,12 @@ export class RoomDurableObject implements DurableObject {
       this.room.currentRoll,
       p.hasCaptured,
       p.color ?? undefined,
+      this.room.boardMode,
     );
   }
 
   private toPublicPlayers(): PlayerPublic[] {
+    const mode = this.room.boardMode;
     return this.room.players.map((p) => ({
       id: p.id,
       name: p.name,
@@ -296,7 +312,7 @@ export class RoomDurableObject implements DurableObject {
       ready: this.room.phase === "lobby" ? Boolean(p.ready) : false,
       pawns: [...p.pawns],
       hasCaptured: p.hasCaptured,
-      finishedCount: finishedCount(p.pawns),
+      finishedCount: finishedCount(p.pawns, mode),
       left: p.left,
     }));
   }
@@ -318,6 +334,7 @@ export class RoomDurableObject implements DurableObject {
       phaseEndsAt: this.room.phaseEndsAt,
       canStart: this.canStart(),
       expectedPlayerCount: this.room.expectedPlayerCount,
+      boardMode: this.room.boardMode,
       gameOver: this.room.gameOver,
       paused: this.room.paused,
       pausedByName: this.pausedByName(),
@@ -341,6 +358,7 @@ export class RoomDurableObject implements DurableObject {
       phaseEndsAt: this.room.phaseEndsAt,
       canStart: this.canStart(),
       expectedPlayerCount: this.room.expectedPlayerCount,
+      boardMode: this.room.boardMode,
       gameOver: this.room.gameOver,
       paused: this.room.paused,
       pausedByName: this.pausedByName(),
@@ -424,6 +442,7 @@ export class RoomDurableObject implements DurableObject {
       this.room.currentRoll,
       active.hasCaptured,
       active.color ?? undefined,
+      this.room.boardMode,
     );
     return valid.length > 0 ? MOVE_TIMEOUT_MS : SKIP_TIMEOUT_MS;
   }
@@ -505,17 +524,19 @@ export class RoomDurableObject implements DurableObject {
     this.room.lastMove = { playerId: me.id, pawnIndex, from, to };
 
     let captured = false;
-    if (to === CENTER_INDEX) {
+    const mode = this.room.boardMode;
+    const center = getBoardConfig(mode).centerIndex;
+    if (to === center) {
       this.broadcastEvent({ kind: "pawnHome", playerId: me.id, pawnIndex });
     } else {
-      const coord = coordFor(me.color, to);
-      if (coord && !isSafeCell(coord)) {
+      const coord = coordForMode(mode, me.color, to);
+      if (coord && !isSafeCellMode(mode, coord)) {
         for (const op of this.room.players) {
           if (op.id === me.id || !op.color || op.left) continue;
           for (let j = 0; j < op.pawns.length; j++) {
             const opPos = op.pawns[j]!;
-            if (opPos < 0 || opPos === CENTER_INDEX) continue;
-            const opCoord = coordFor(op.color, opPos);
+            if (opPos < 0 || opPos === center) continue;
+            const opCoord = coordForMode(mode, op.color, opPos);
             if (opCoord && opCoord[0] === coord[0] && opCoord[1] === coord[1]) {
               op.pawns[j] = 0; // send home
               captured = true;
@@ -584,7 +605,7 @@ export class RoomDurableObject implements DurableObject {
 
   private async afterResolution(): Promise<void> {
     const active = this.getPlayer(this.room.activePlayerId);
-    if (active && finishedCount(active.pawns) === PAWNS_PER_PLAYER) {
+    if (active && finishedCount(active.pawns, this.room.boardMode) === PAWNS_PER_PLAYER) {
       await this.endGame(active.id);
       return;
     }
@@ -633,8 +654,8 @@ export class RoomDurableObject implements DurableObject {
         id: p.id,
         name: p.name,
         color: p.color,
-        finishedCount: finishedCount(p.pawns),
-        maxProgress: maxProgress(p.pawns),
+        finishedCount: finishedCount(p.pawns, this.room.boardMode),
+        maxProgress: maxProgress(p.pawns, this.room.boardMode),
         left: p.left,
       }))
       .sort((a, b) => {
@@ -694,6 +715,7 @@ export class RoomDurableObject implements DurableObject {
           this.room.currentRoll,
           active.hasCaptured,
           active.color ?? undefined,
+          this.room.boardMode,
         );
         if (valid.length > 0) {
           const pick = valid[Math.floor(Math.random() * valid.length)]!;
@@ -876,7 +898,18 @@ export class RoomDurableObject implements DurableObject {
             typeof msg.name === "string" &&
             msg.name.trim()
           ) {
-            player.name = msg.name.trim().slice(0, 16);
+            const nextName = msg.name.trim().slice(0, 16);
+            if (this.isNameTaken(nextName, player.id)) {
+              this.send(ws, {
+                type: "event",
+                event: {
+                  kind: "error",
+                  message: "That name is already taken in this lobby",
+                },
+              });
+            } else {
+              player.name = nextName;
+            }
           }
         } else {
           if (this.room.phase !== "lobby") {
@@ -896,9 +929,20 @@ export class RoomDurableObject implements DurableObject {
           const isFirst = this.room.players.length === 0;
           const rawName =
             "name" in msg && typeof msg.name === "string" ? msg.name.trim().slice(0, 16) : "";
+          const name = rawName || `Player ${this.room.players.length + 1}`;
+          if (this.isNameTaken(name)) {
+            this.send(ws, {
+              type: "event",
+              event: {
+                kind: "error",
+                message: "That name is already taken in this lobby",
+              },
+            });
+            return;
+          }
           player = {
             id: msg.playerId,
-            name: rawName || `Player ${this.room.players.length + 1}`,
+            name,
             isHost: isFirst,
             connected: true,
             color: this.firstFreeColor(),
@@ -928,7 +972,25 @@ export class RoomDurableObject implements DurableObject {
         const me = this.requirePlayer(ws, meta);
         if (!me) return;
         if (this.room.phase !== "lobby") return;
-        me.name = msg.name.trim().slice(0, 16);
+        const nextName = msg.name.trim().slice(0, 16);
+        if (!nextName) {
+          this.send(ws, {
+            type: "event",
+            event: { kind: "error", message: "Enter a name" },
+          });
+          return;
+        }
+        if (this.isNameTaken(nextName, me.id)) {
+          this.send(ws, {
+            type: "event",
+            event: {
+              kind: "error",
+              message: "That name is already taken in this lobby",
+            },
+          });
+          return;
+        }
+        me.name = nextName;
         await this.persist();
         this.broadcastState();
         break;
@@ -1029,6 +1091,46 @@ export class RoomDurableObject implements DurableObject {
         break;
       }
 
+      case "setBoardMode": {
+        const me = this.requirePlayer(ws, meta);
+        const isHost =
+          me != null &&
+          this.room.hostPlayerId != null &&
+          me.id === this.room.hostPlayerId;
+        if (!me || !isHost) {
+          this.send(ws, {
+            type: "event",
+            event: { kind: "error", message: "Only the host can set board mode" },
+          });
+          return;
+        }
+        if (this.room.phase !== "lobby") return;
+        if (this.room.players.length > 1) {
+          this.send(ws, {
+            type: "event",
+            event: {
+              kind: "error",
+              message: "Board mode is locked after players join",
+            },
+          });
+          return;
+        }
+        if (!isBoardMode(msg.mode)) {
+          this.send(ws, {
+            type: "event",
+            event: { kind: "error", message: "Invalid board mode" },
+          });
+          return;
+        }
+        if (this.room.boardMode !== msg.mode) {
+          this.room.boardMode = msg.mode;
+          this.clearAllReady();
+        }
+        await this.persist();
+        this.broadcastState();
+        break;
+      }
+
       case "setReady": {
         const me = this.requirePlayer(ws, meta);
         if (!me) return;
@@ -1107,6 +1209,7 @@ export class RoomDurableObject implements DurableObject {
           this.room.currentRoll,
           me.hasCaptured,
           me.color ?? undefined,
+          this.room.boardMode,
         );
         if (!valid.includes(msg.pawnIndex)) {
           this.send(ws, {
@@ -1130,6 +1233,7 @@ export class RoomDurableObject implements DurableObject {
           this.room.currentRoll,
           me.hasCaptured,
           me.color ?? undefined,
+          this.room.boardMode,
         );
         if (valid.length > 0) {
           this.send(ws, {

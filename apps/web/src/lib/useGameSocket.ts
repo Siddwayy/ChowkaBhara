@@ -98,6 +98,10 @@ export function useGameSocket({
             setEvents((prev) => [...prev.slice(-30), msg]);
             if (msg.event.kind === "error") {
               setLastError(msg.event.message);
+              // Allow a fresh join attempt after a rejected name (or similar).
+              if (/already taken|Room is full|already in progress/i.test(msg.event.message)) {
+                joinedRef.current = false;
+              }
             }
           }
         } catch {

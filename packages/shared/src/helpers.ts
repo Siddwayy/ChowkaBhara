@@ -1,10 +1,10 @@
 import {
   BONUS_ROLLS,
-  CENTER_INDEX,
   ROLL_VALUES,
   ROOM_CODE_ALPHABET,
   ROOM_CODE_LENGTH,
 } from "./constants.js";
+import { getBoardConfig, type BoardMode } from "./boardConfig.js";
 import type { Color } from "./types.js";
 
 /** Opposite home seats for face-to-face 2-player games. */
@@ -14,12 +14,6 @@ const OPPOSITE: Record<Color, Color> = {
   blue: "yellow",
   yellow: "blue",
 };
-
-/**
- * Path indices that are safe for every color (rotationally symmetric on the
- * shared track): 4 outer entries, 4 middle-ring corners, and center.
- */
-const SAFE_PATH_INDICES = new Set([0, 6, 12, 18, 27, 31, 35, 39, CENTER_INDEX]);
 
 export function oppositeColor(color: Color): Color {
   return OPPOSITE[color];
@@ -67,8 +61,10 @@ export function wouldLandOnOwnPawn(
   pawns: number[],
   pawnIndex: number,
   dest: number,
+  mode?: BoardMode | null,
 ): boolean {
-  if (SAFE_PATH_INDICES.has(dest)) return false;
+  const cfg = getBoardConfig(mode);
+  if (cfg.safePathIndices.has(dest)) return false;
   for (let i = 0; i < pawns.length; i++) {
     if (i === pawnIndex) continue;
     if (effectivePos(pawns[i]!) === dest) return true;
@@ -88,12 +84,18 @@ export function isMoveValid(
   _hasCaptured: boolean = false,
   pawns?: number[],
   pawnIndex?: number,
+  mode?: BoardMode | null,
 ): boolean {
+  const center = getBoardConfig(mode).centerIndex;
   if (!isValidRoll(roll)) return false;
-  if (pos === CENTER_INDEX) return false;
+  if (pos === center) return false;
   const dest = destForPawn(pos, roll);
-  if (dest > CENTER_INDEX) return false;
-  if (pawns && pawnIndex != null && wouldLandOnOwnPawn(pawns, pawnIndex, dest)) {
+  if (dest > center) return false;
+  if (
+    pawns &&
+    pawnIndex != null &&
+    wouldLandOnOwnPawn(pawns, pawnIndex, dest, mode)
+  ) {
     return false;
   }
   return true;
@@ -105,21 +107,24 @@ export function computeValidMoves(
   roll: number,
   hasCaptured: boolean,
   _color?: Color,
+  mode?: BoardMode | null,
 ): number[] {
   const out: number[] = [];
   for (let i = 0; i < pawns.length; i++) {
-    if (isMoveValid(pawns[i]!, roll, hasCaptured, pawns, i)) out.push(i);
+    if (isMoveValid(pawns[i]!, roll, hasCaptured, pawns, i, mode)) out.push(i);
   }
   return out;
 }
 
-export function finishedCount(pawns: number[]): number {
-  return pawns.filter((p) => p === CENTER_INDEX).length;
+export function finishedCount(pawns: number[], mode?: BoardMode | null): number {
+  const center = getBoardConfig(mode).centerIndex;
+  return pawns.filter((p) => p === center).length;
 }
 
 /** How far a player's furthest pawn has progressed (for ranking). */
-export function maxProgress(pawns: number[]): number {
-  return pawns.reduce((m, p) => Math.max(m, Math.min(p, CENTER_INDEX)), -1);
+export function maxProgress(pawns: number[], mode?: BoardMode | null): number {
+  const center = getBoardConfig(mode).centerIndex;
+  return pawns.reduce((m, p) => Math.max(m, Math.min(p, center)), -1);
 }
 
 export function generateRoomCode(random: () => number = Math.random): string {

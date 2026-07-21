@@ -1,5 +1,10 @@
 import { useState } from "react";
-import { MAX_PLAYERS, MIN_PLAYERS, ROOM_CODE_LENGTH } from "@chowka/shared";
+import {
+  MAX_PLAYERS,
+  MIN_PLAYERS,
+  ROOM_CODE_LENGTH,
+  type BoardMode,
+} from "@chowka/shared";
 import { getServerHttpUrl } from "../lib/serverUrl";
 import { playSound, unlockAudio } from "../lib/sound";
 import { PrimaryButton } from "./ui";
@@ -18,6 +23,7 @@ export function HomeLobby() {
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
   const [maxPlayers, setMaxPlayers] = useState(4);
+  const [boardMode, setBoardMode] = useState<BoardMode>("7x7");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -47,6 +53,7 @@ export function HomeLobby() {
         code: data.code,
         name: trimmed,
         max: String(maxPlayers),
+        mode: boardMode,
       });
       window.location.href = `/play?${params.toString()}`;
     } catch (e) {
@@ -125,6 +132,45 @@ export function HomeLobby() {
                 autoComplete="nickname"
                 className={fieldClass}
               />
+            </div>
+
+            <div className="space-y-2">
+              <label className="block font-display text-sm font-semibold text-ink-soft">
+                Board mode
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    playSound("tap");
+                    setBoardMode("7x7");
+                  }}
+                  className={`rounded-2xl px-3 py-3 font-display text-sm font-semibold transition ${
+                    boardMode === "7x7"
+                      ? "bg-o2 text-ink shadow-card ring-2 ring-o2-dark"
+                      : "bg-ink/5 text-ink-soft ring-1 ring-ink/10"
+                  }`}
+                >
+                  7×7 Classic
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    playSound("tap");
+                    setBoardMode("5x5");
+                  }}
+                  className={`rounded-2xl px-3 py-3 font-display text-sm font-semibold transition ${
+                    boardMode === "5x5"
+                      ? "bg-o2 text-ink shadow-card ring-2 ring-o2-dark"
+                      : "bg-ink/5 text-ink-soft ring-1 ring-ink/10"
+                  }`}
+                >
+                  5×5 Classic
+                </button>
+              </div>
+              <p className="text-center text-sm text-ink-faint">
+                Same rules — different board size
+              </p>
             </div>
 
             <div className="space-y-2">
