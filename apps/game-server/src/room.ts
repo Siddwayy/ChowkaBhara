@@ -1293,6 +1293,18 @@ export class RoomDurableObject implements DurableObject {
         break;
       }
 
+      case "advanceResolution": {
+        const me = this.requirePlayer(ws, meta);
+        if (!me) return;
+        if (this.room.paused) return;
+        if (this.room.phase !== "resolution") return;
+        // Only the player whose turn is resolving may drive the advance; the
+        // phase alarm remains as a fallback if their client never sends this.
+        if (this.room.activePlayerId !== me.id) return;
+        await this.afterResolution();
+        break;
+      }
+
       case "pauseGame": {
         const me = this.requirePlayer(ws, meta);
         if (!me) return;

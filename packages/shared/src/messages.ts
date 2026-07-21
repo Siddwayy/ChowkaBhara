@@ -49,6 +49,7 @@ export const ClientMessageSchema = z.discriminatedUnion("type", [
     pawnIndex: z.number().int().min(0).max(PAWNS_PER_PLAYER - 1),
   }),
   z.object({ type: z.literal("skipTurn") }),
+  z.object({ type: z.literal("advanceResolution") }),
   z.object({ type: z.literal("pauseGame") }),
   z.object({ type: z.literal("resumeGame") }),
   z.object({ type: z.literal("exitGame") }),

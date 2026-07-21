@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   COLORS,
   PAWN_SHAPES,
+  TRAVEL_SETTLE_MS,
+  TRAVEL_STEP_MS,
   coordForMode,
   destForPawn,
   oppositeColor,
@@ -115,6 +117,40 @@ export function PlayScreen({
     }
     processedEvents.current = events.length;
   }, [events, play, playerId]);
+
+  // Drive the resolution phase from the active player's client once the pawn
+  // travel animation has finished. The server keeps a phase alarm as a
+  // fallback, but relying on that alarm alone caused intermittent stalls on the
+  // "Watch the path" screen (short Durable Object alarms can fire late).
+  const advanceSentRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!playerView) return;
+    if (playerView.phase !== "resolution" || playerView.paused) {
+      advanceSentRef.current = null;
+      return;
+    }
+    if (playerView.activePlayerId !== playerView.myPlayerId) return;
+    const lm = playerView.lastMove;
+    const steps = lm ? Math.max(1, lm.to - Math.max(0, lm.from)) : 1;
+    const key = lm
+      ? `${lm.playerId}:${lm.pawnIndex}:${lm.from}:${lm.to}`
+      : `skip:${playerView.currentRoll}:${playerView.activePlayerId}`;
+    if (advanceSentRef.current === key) return;
+    advanceSentRef.current = key;
+    const delay = steps * TRAVEL_STEP_MS + TRAVEL_SETTLE_MS;
+    const timer = window.setTimeout(() => {
+      send({ type: "advanceResolution" });
+    }, delay);
+    return () => window.clearTimeout(timer);
+  }, [
+    playerView?.phase,
+    playerView?.paused,
+    playerView?.activePlayerId,
+    playerView?.myPlayerId,
+    playerView?.lastMove,
+    playerView?.currentRoll,
+    send,
+  ]);
 
   useEffect(() => {
     if (desiredMax == null || maxSent.current) return;
