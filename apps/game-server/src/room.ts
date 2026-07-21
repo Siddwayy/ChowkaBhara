@@ -154,6 +154,7 @@ export class RoomDurableObject implements DurableObject {
         const meta = ws.deserializeAttachment() as SessionMeta | null;
         this.sessions.set(ws, meta ?? { playerId: null, role: "player" });
       }
+      await this.ensurePhaseAlarm();
     });
   }
 
@@ -433,6 +434,41 @@ export class RoomDurableObject implements DurableObject {
     }
   }
 
+  /**
+   * Heal a missing/expired phase alarm without resetting a still-valid timer.
+   * No-op while paused (pause owns the timer lifecycle).
+   */
+  private async ensurePhaseAlarm(): Promise<void> {
+    if (this.room.paused) return;
+    const timed =
+      this.room.phase === "roll" ||
+      this.room.phase === "move" ||
+      this.room.phase === "resolution";
+    if (!timed) return;
+
+    const now = Date.now();
+    const existing = await this.state.storage.getAlarm();
+    const endsAt = this.room.phaseEndsAt;
+
+    if (endsAt != null && endsAt > now && existing != null) {
+      return;
+    }
+
+    if (endsAt != null && endsAt > now) {
+      await this.state.storage.setAlarm(endsAt);
+      return;
+    }
+
+    // Missing or overdue — schedule ASAP (or a fresh full window if no end time).
+    if (endsAt != null && endsAt <= now) {
+      this.room.phaseEndsAt = now;
+      await this.state.storage.setAlarm(now);
+      return;
+    }
+
+    await this.restartPhaseTimer();
+  }
+
   /** 45s when there are legal moves; 10s when the player can only skip. */
   private moveTimeoutMs(): number {
     const active = this.getPlayer(this.room.activePlayerId);
@@ -616,13 +652,8 @@ export class RoomDurableObject implements DurableObject {
     const next = this.nextConnectedAfter(this.room.activePlayerId);
     this.room.activePlayerId = next;
     if (!next) {
-      this.room.currentRoll = null;
-      this.room.lastMove = null;
-      this.room.bonusPending = false;
-      this.room.phaseEndsAt = null;
-      await this.state.storage.deleteAlarm();
-      this.broadcastState();
-      await this.persist();
+      // Nobody left to take a turn — end rather than sit in resolution forever.
+      await this.endGame(null);
       return;
     }
     this.broadcastEvent({ kind: "turnPassed", playerId: next });
@@ -699,7 +730,11 @@ export class RoomDurableObject implements DurableObject {
   }
 
   async alarm(): Promise<void> {
-    if (this.room.paused) return;
+    if (this.room.paused) {
+      // One-shot alarm was consumed; keep a short wake so pause can't soft-lock.
+      await this.state.storage.setAlarm(Date.now() + 2000);
+      return;
+    }
     switch (this.room.phase) {
       case "roll":
         await this.doRoll();
@@ -846,6 +881,15 @@ export class RoomDurableObject implements DurableObject {
     if (this.room.phase !== "lobby" && player.isHost) {
       this.promoteHost();
     }
+
+    // Pause holder dropped — auto-resume so the room can't soft-lock.
+    if (this.room.paused && this.room.pausedById === player.id) {
+      this.room.paused = false;
+      this.room.pausedById = null;
+      await this.restartPhaseTimer();
+      this.broadcastEvent({ kind: "resumed" });
+    }
+
     await this.persist();
     this.broadcastState();
   }
@@ -1308,10 +1352,12 @@ export class RoomDurableObject implements DurableObject {
         if (me.isHost) this.promoteHost();
         this.broadcastEvent({ kind: "playerLeft", playerId: me.id, name: me.name });
 
-        // If the pause holder left, clear the pause.
+        // If the pause holder left, clear the pause and restore the phase timer.
+        let clearedPause = false;
         if (this.room.pausedById === me.id) {
           this.room.paused = false;
           this.room.pausedById = null;
+          clearedPause = true;
         }
 
         const ended = await this.checkLastStanding();
@@ -1325,10 +1371,12 @@ export class RoomDurableObject implements DurableObject {
               this.broadcastEvent({ kind: "turnPassed", playerId: nextIfActive });
               await this.enterRoll();
             } else {
-              this.broadcastState();
-              await this.persist();
+              await this.endGame(null);
             }
           } else {
+            if (clearedPause) {
+              await this.restartPhaseTimer();
+            }
             this.broadcastState();
             await this.persist();
           }

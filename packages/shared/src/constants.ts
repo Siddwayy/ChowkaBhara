@@ -42,7 +42,7 @@ export const ROLL_VALUES = [1, 2, 3, 4, 8] as const;
 export const BONUS_ROLLS: readonly number[] = [4, 8];
 
 /** How long the "resolution" pause lasts so moves/captures animate. */
-export const RESOLUTION_MS = 1600;
+export const RESOLUTION_MS = 1200;
 /** Auto-throw shells if the active player idles. */
 export const ROLL_TIMEOUT_MS = 20_000;
 /** Auto-move a random legal pawn if the active player idles. */

@@ -74,7 +74,10 @@ export function useTravelAnimation(
     const from = Math.max(0, lastMove.from);
     const to = lastMove.to;
     const steps = Math.max(1, to - from);
-    const stepMs = Math.min(220, Math.floor(RESOLUTION_MS / steps));
+    // Pace steps to fill almost all of RESOLUTION_MS so short rolls don't
+    // finish early and leave a long frozen "Watch the path" gap.
+    const settleMs = 180;
+    const stepMs = Math.max(90, Math.floor((RESOLUTION_MS - settleMs) / steps));
 
     setTravel({
       playerId: lastMove.playerId,
