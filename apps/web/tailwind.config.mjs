@@ -55,6 +55,11 @@ export default {
           "0%, 100%": { opacity: "1", transform: "scale(1)" },
           "50%": { opacity: "0.85", transform: "scale(1.02)" },
         },
+        /** Opacity-only: safe for grid cells, where scaling bleeds into neighbors. */
+        pulseSoft: {
+          "0%, 100%": { opacity: "0.9" },
+          "50%": { opacity: "0.35" },
+        },
         fadeIn: {
           from: { opacity: "0", transform: "translateY(8px)" },
           to: { opacity: "1", transform: "translateY(0)" },
@@ -75,6 +80,7 @@ export default {
       },
       animation: {
         pulseGlow: "pulseGlow 1.8s ease-in-out infinite",
+        pulseSoft: "pulseSoft 1.8s ease-in-out infinite",
         fadeIn: "fadeIn 0.35s ease-out",
         bob: "bob 2.4s ease-in-out infinite",
         popIn: "popIn 0.3s ease-out",

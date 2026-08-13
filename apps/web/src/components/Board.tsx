@@ -412,18 +412,21 @@ const StaticGrid = memo(function StaticGrid({
               boxShadow: centerGlow,
             }}
           >
-            {isActiveHome && (
+            {isActiveHome && homeTheme && (
               <div
-                className="pointer-events-none absolute inset-0 animate-pulseGlow"
+                className="pointer-events-none absolute inset-0 animate-pulseSoft"
+                style={{ background: `${homeTheme.hex}55` }}
                 aria-hidden="true"
               />
             )}
             {safe && (
-              <SafeHouse
-                color={homeTheme ? homeTheme.hex : "#000000"}
-                heavy={isCenter}
-                rotation={rotation}
-              />
+              <div className="relative z-[1] flex h-full w-full items-center justify-center">
+                <SafeHouse
+                  color={homeTheme ? homeTheme.hex : "#000000"}
+                  heavy={isCenter}
+                  rotation={rotation}
+                />
+              </div>
             )}
           </div>
         );
@@ -456,10 +459,19 @@ const HighlightLayer = memo(function HighlightLayer({
   for (const k of trailKeys) keys.add(k);
   if (keys.size === 0) return null;
 
-  const cell = 100 / boardSize;
-
   return (
-    <div className="pointer-events-none absolute inset-0 z-[1]">
+    // Mirrors StaticGrid's tracks and border box exactly so highlights land on
+    // the same pixels as the cells beneath them.
+    <div
+      className="pointer-events-none absolute inset-0 z-[1] grid"
+      style={{
+        gap: 0,
+        border: "2.5px solid transparent",
+        gridTemplateColumns: `repeat(${boardSize}, 1fr)`,
+        gridTemplateRows: `repeat(${boardSize}, 1fr)`,
+      }}
+      aria-hidden="true"
+    >
       {[...keys].map((k) => {
         const [rs, cs] = k.split("-");
         const r = Number(rs);
@@ -470,36 +482,38 @@ const HighlightLayer = memo(function HighlightLayer({
         const isPreview = previewKey === k;
         const hex = isPreview ? previewHex : travelHex;
         if (!hex) return null;
-        const bg =
-          isDest || isCurrent
-            ? `linear-gradient(180deg, ${hex}aa 0%, ${hex}66 100%)`
+        // Tints only — an opaque stop would repaint the cell's zone color.
+        const bg = isDest
+          ? `linear-gradient(180deg, ${hex}aa 0%, ${hex}66 100%)`
+          : isCurrent
+            ? `linear-gradient(180deg, ${hex}99 0%, ${hex}55 100%)`
             : isPreview
               ? `linear-gradient(180deg, ${hex}bb 0%, ${hex}66 100%)`
               : isTrail
-                ? `linear-gradient(180deg, ${hex}44 0%, #e2cb9e 100%)`
+                ? `linear-gradient(180deg, ${hex}55 0%, ${hex}18 100%)`
                 : undefined;
+        const pulses = isCurrent || isDest || isPreview;
         return (
           <div
             key={k}
-            className="absolute"
+            className="relative"
             style={{
-              left: `${c * cell}%`,
-              top: `${r * cell}%`,
-              width: `${cell}%`,
-              height: `${cell}%`,
+              gridColumn: c + 1,
+              gridRow: r + 1,
               background: bg,
-              boxShadow:
-                isCurrent || isDest
-                  ? `inset 0 0 0 2.5px ${hex}`
-                  : isPreview
-                    ? `inset 0 0 0 3px ${hex}`
-                    : undefined,
+              borderRight: c < boardSize - 1 ? "2.5px solid #1a1208" : undefined,
+              borderBottom: r < boardSize - 1 ? "2.5px solid #1a1208" : undefined,
+              boxShadow: isCurrent || isDest
+                ? `inset 0 0 0 2.5px ${hex}`
+                : isPreview
+                  ? `inset 0 0 0 3px ${hex}`
+                  : undefined,
             }}
           >
-            {(isCurrent || isDest || isPreview) && (
+            {pulses && (
               <div
-                className="absolute inset-0 animate-pulseGlow"
-                aria-hidden="true"
+                className="absolute inset-0 animate-pulseSoft"
+                style={{ background: `${hex}44` }}
               />
             )}
           </div>
@@ -537,10 +551,10 @@ const PawnToken = memo(function PawnToken({
     <div
       className="relative h-full w-full"
       style={{
-        boxShadow: finished
-          ? `0 0 6px ${theme.hex}`
-          : "0 2px 3px rgba(26,18,8,0.45)",
-        borderRadius: shape === "circle" ? "999px" : 6,
+        // drop-shadow follows the token silhouette; box-shadow would draw a box.
+        filter: finished
+          ? `drop-shadow(0 0 6px ${theme.hex})`
+          : "drop-shadow(0 2px 3px rgba(26,18,8,0.45))",
         ...upright,
       }}
     >
