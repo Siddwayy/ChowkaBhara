@@ -36,21 +36,22 @@ export function useTravelAnimation(
 ): TravelAnim | null {
   const [travel, setTravel] = useState<TravelAnim | null>(null);
   const seenKey = useRef<string | null>(null);
-  const intervalRef = useRef<number | null>(null);
+  const rafRef = useRef<number | null>(null);
 
   const moveKey = lastMove ? travelKey(lastMove) : null;
+  const moverId = lastMove?.playerId ?? null;
 
   const moverColor = useMemo(() => {
-    if (!lastMove) return null;
-    return players.find((p) => p.id === lastMove.playerId)?.color ?? null;
-  }, [lastMove?.playerId, players]);
+    if (!moverId) return null;
+    return players.find((p) => p.id === moverId)?.color ?? null;
+  }, [moverId, players]);
 
   useEffect(() => {
     if (!phase) return;
     if (phase !== "resolution" && phase !== "move") {
-      if (intervalRef.current != null) {
-        window.clearInterval(intervalRef.current);
-        intervalRef.current = null;
+      if (rafRef.current != null) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
       }
       setTravel(null);
       seenKey.current = null;
@@ -60,74 +61,67 @@ export function useTravelAnimation(
   useLayoutEffect(() => {
     if (!lastMove || !moverColor || !moveKey) return;
     if (phase !== "resolution") return;
-
-    // Same move already animating — keep the interval alive across state
-    // rebroadcasts (pause/resume, reconnect) that recreate lastMove objects.
     if (seenKey.current === moveKey) return;
     seenKey.current = moveKey;
 
-    if (intervalRef.current != null) {
-      window.clearInterval(intervalRef.current);
-      intervalRef.current = null;
+    if (rafRef.current != null) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
     }
 
     const from = Math.max(0, lastMove.from);
     const to = lastMove.to;
     const steps = Math.max(1, to - from);
-    const stepMs = TRAVEL_STEP_MS;
-
     const playerId = lastMove.playerId;
     const pawnIndex = lastMove.pawnIndex;
     const color = moverColor;
 
-    // First cell immediately — don't wait a full step before anything moves.
-    setTravel({
-      playerId,
-      pawnIndex,
-      color,
-      from,
-      to,
-      stepPos: from + 1,
-      revealedSteps: 1,
-      landed: steps === 1,
-    });
-
-    if (steps <= 1) {
-      return;
-    }
-
-    let step = 1;
-    intervalRef.current = window.setInterval(() => {
-      step += 1;
-      if (step <= steps) {
-        setTravel({
-          playerId,
-          pawnIndex,
-          color,
-          from,
-          to,
-          stepPos: from + step,
-          revealedSteps: step,
-          landed: step === steps,
-        });
-      }
-      if (step >= steps && intervalRef.current != null) {
-        window.clearInterval(intervalRef.current);
-        intervalRef.current = null;
-      }
-    }, stepMs);
-
-    // Do not clear the interval on dep churn — only on unmount or new move key.
-    return () => {
-      /* kept alive intentionally; cleared when moveKey changes or phase exits */
+    const applyStep = (step: number) => {
+      setTravel({
+        playerId,
+        pawnIndex,
+        color,
+        from,
+        to,
+        stepPos: from + step,
+        revealedSteps: step,
+        landed: step >= steps,
+      });
     };
-  }, [moveKey, moverColor, phase, lastMove]);
+
+    // First cell immediately — don't wait a full step before anything moves.
+    applyStep(1);
+
+    if (steps <= 1) return;
+
+    const startedAt = performance.now();
+    const tick = (now: number) => {
+      const elapsed = now - startedAt;
+      const step = Math.min(steps, 1 + Math.floor(elapsed / TRAVEL_STEP_MS));
+      applyStep(step);
+      if (step < steps) {
+        rafRef.current = requestAnimationFrame(tick);
+      } else {
+        rafRef.current = null;
+      }
+    };
+    rafRef.current = requestAnimationFrame(tick);
+
+    return () => {
+      if (rafRef.current != null) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+    };
+    // lastMove is identified by moveKey; omitting the object avoids restarting on rebroadcasts.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [moveKey, moverColor, phase]);
 
   useEffect(() => {
     return () => {
-      if (intervalRef.current != null) {
-        window.clearInterval(intervalRef.current);
-        intervalRef.current = null;
+      if (rafRef.current != null) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
       }
     };
   }, []);

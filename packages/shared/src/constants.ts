@@ -41,17 +41,27 @@ export const ROLL_VALUES = [1, 2, 3, 4, 8] as const;
 /** Rolling one of these grants the same player another turn. */
 export const BONUS_ROLLS: readonly number[] = [4, 8];
 
-/** How long the "resolution" pause lasts so moves/captures animate. */
+/** Fallback / legacy resolution window (pause-resume uses travel-based timing). */
 export const RESOLUTION_MS = 1400;
 /** Per-cell travel animation step (client + used to size resolution). */
 export const TRAVEL_STEP_MS = 140;
 /** Brief pause after the pawn lands before the next turn. */
 export const TRAVEL_SETTLE_MS = 200;
+/** Extra slack on the Durable Object resolution alarm (client drives the clock). */
+export const RESOLUTION_ALARM_SLACK_MS = 400;
 
-/** Resolution duration for a move that advances `steps` path cells. */
-export function resolutionMsForSteps(steps: number): number {
+/**
+ * Time from the first (instant) step until land + settle.
+ * Used by the active client to send `advanceResolution`.
+ */
+export function travelDurationMs(steps: number): number {
   const n = Math.max(1, steps);
-  return n * TRAVEL_STEP_MS + TRAVEL_SETTLE_MS;
+  return (n - 1) * TRAVEL_STEP_MS + TRAVEL_SETTLE_MS;
+}
+
+/** Server resolution window (travel + slack so the DO alarm is only a fallback). */
+export function resolutionMsForSteps(steps: number): number {
+  return travelDurationMs(steps) + RESOLUTION_ALARM_SLACK_MS;
 }
 /** Auto-throw shells if the active player idles. */
 export const ROLL_TIMEOUT_MS = 20_000;

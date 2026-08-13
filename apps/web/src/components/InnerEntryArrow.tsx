@@ -1,3 +1,4 @@
+import { memo } from "react";
 import {
   getBoardConfig,
   type BoardMode,
@@ -101,11 +102,11 @@ export function InnerEntryArrow({
 /**
  * Entry arrows per color in play from the active board config.
  */
-export function InnerEntryArrows({
+export const InnerEntryArrows = memo(function InnerEntryArrows({
   colors,
   boardMode = "7x7",
 }: {
-  colors: Color[];
+  colors: readonly Color[];
   boardMode?: BoardMode;
 }) {
   const cfg = getBoardConfig(boardMode);
@@ -138,4 +139,4 @@ export function InnerEntryArrows({
       })}
     </svg>
   );
-}
+});

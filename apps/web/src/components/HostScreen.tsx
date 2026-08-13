@@ -1,13 +1,13 @@
-import { useEffect, useRef, useState } from "react";
-import { type HostView } from "@chowka/shared";
-import { useCountdown, useGameSocket } from "../lib/useGameSocket";
+import { useCallback, useEffect, useState } from "react";
+import { type HostView, type ServerMessage } from "@chowka/shared";
+import { useGameSocket } from "../lib/useGameSocket";
 import { useAudio, usePhaseSound } from "../lib/useAudio";
 import { useTravelAnimation } from "../lib/useTravelAnimation";
 import { COLOR_THEME } from "../lib/colors";
 import { Board, Pockets } from "./Board";
 import { MuteButton } from "./MuteButton";
 import { Scorecard } from "./Scorecard";
-import { CrewList, Instruction, PhaseShell, ShellDice } from "./ui";
+import { CrewList, Instruction, PhaseCountdown, PhaseShell, ShellDice } from "./ui";
 
 function activePlayer(view: HostView) {
   return view.players.find((p) => p.id === view.activePlayerId) ?? null;
@@ -63,35 +63,38 @@ function SidePanel({ view, settleDice }: { view: HostView; settleDice: boolean }
   );
 }
 
-export function HostScreen({ code }: { code: string }) {
-  const { view, status, lastError, events } = useGameSocket({
-    code,
-    role: "host",
-    playerId: "host-display",
-  });
-  const { muted, toggleMute, play } = useAudio();
-  const hostView = view?.role === "host" ? view : null;
-  const seconds = useCountdown(hostView?.phaseEndsAt ?? null);
-  const [settleDice, setSettleDice] = useState(false);
-  const travel = useTravelAnimation(
-    hostView?.lastMove,
-    hostView?.players ?? [],
-    hostView?.phase,
+function HostBoard({ view }: { view: HostView }) {
+  const travel = useTravelAnimation(view.lastMove, view.players, view.phase);
+  return (
+    <div className="mx-auto max-w-2xl">
+      <Board
+        players={view.players}
+        activePlayerId={view.activePlayerId}
+        boardMode={view.boardMode}
+        travel={travel}
+      />
+      <div className="mt-4">
+        <Pockets players={view.players} boardMode={view.boardMode} />
+      </div>
+      {travel && (
+        <p className="mt-2 text-center font-display text-lg text-warn">
+          Moving {travel.to - travel.from} space{travel.to - travel.from === 1 ? "" : "s"}
+        </p>
+      )}
+      <PhaseCountdown
+        phaseEndsAt={view.paused ? null : view.phaseEndsAt}
+        className={travel ? "mt-1 text-center text-sm text-surface/50" : "mt-3 text-center text-sm text-surface/50"}
+      />
+    </div>
   );
+}
 
-  usePhaseSound(hostView?.phase, play);
+export function HostScreen({ code }: { code: string }) {
+  const { muted, toggleMute, play } = useAudio();
+  const [settleDice, setSettleDice] = useState(false);
 
-  useEffect(() => {
-    if (!settleDice) return;
-    const t = window.setTimeout(() => setSettleDice(false), 550);
-    return () => window.clearTimeout(t);
-  }, [settleDice]);
-
-  const processedEvents = useRef(0);
-  useEffect(() => {
-    for (let i = processedEvents.current; i < events.length; i++) {
-      const msg = events[i];
-      if (!msg || msg.type !== "event") continue;
+  const onSocketEvent = useCallback(
+    (msg: Extract<ServerMessage, { type: "event" }>) => {
       switch (msg.event.kind) {
         case "rolled":
           play("roll");
@@ -117,9 +120,25 @@ export function HostScreen({ code }: { code: string }) {
           play("capture");
           break;
       }
-    }
-    processedEvents.current = events.length;
-  }, [events, play]);
+    },
+    [play],
+  );
+
+  const { view, status, lastError } = useGameSocket({
+    code,
+    role: "host",
+    playerId: "host-display",
+    onEvent: onSocketEvent,
+  });
+  const hostView = view?.role === "host" ? view : null;
+
+  usePhaseSound(hostView?.phase, play);
+
+  useEffect(() => {
+    if (!settleDice) return;
+    const t = window.setTimeout(() => setSettleDice(false), 550);
+    return () => window.clearTimeout(t);
+  }, [settleDice]);
 
   return (
     <main className="min-h-dvh px-6 py-6 sm:px-10">
@@ -178,28 +197,7 @@ export function HostScreen({ code }: { code: string }) {
           )}
           <div className="grid gap-8 lg:grid-cols-[1.4fr_1fr]">
             <section>
-              <div className="mx-auto max-w-2xl">
-                <Board
-                  players={hostView.players}
-                  activePlayerId={hostView.activePlayerId}
-                  boardMode={hostView.boardMode}
-                  travel={travel}
-                />
-                <div className="mt-4">
-                  <Pockets players={hostView.players} boardMode={hostView.boardMode} />
-                </div>
-                {travel && (
-                  <p className="mt-2 text-center font-display text-lg text-warn">
-                    Moving {travel.to - travel.from} space{travel.to - travel.from === 1 ? "" : "s"}
-                  </p>
-                )}
-                {seconds > 0 && !travel && (
-                  <p className="mt-3 text-center text-sm text-surface/50">{seconds}s</p>
-                )}
-                {seconds > 0 && travel && (
-                  <p className="mt-1 text-center text-sm text-surface/50">{seconds}s</p>
-                )}
-              </div>
+              <HostBoard view={hostView} />
             </section>
             <SidePanel view={hostView} settleDice={settleDice} />
           </div>

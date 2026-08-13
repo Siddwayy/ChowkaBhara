@@ -1,3 +1,4 @@
+import { memo, useMemo, useRef } from "react";
 import {
   COLORS,
   coordForMode,
@@ -56,7 +57,7 @@ const ORIENT_DEG: Record<Color, number> = {
   yellow: 90,
 };
 
-export function Board({
+export const Board = memo(function Board({
   players,
   activePlayerId,
   orientFor = null,
@@ -92,23 +93,30 @@ export function Board({
   const CENTER_INDEX = cfg.centerIndex;
   const CENTER_RC = (BOARD_SIZE - 1) / 2;
   const rotation = orientFor ? ORIENT_DEG[orientFor] : 0;
-  const livePlayers = players.filter((p) => !p.left);
-  const activeColors = new Set(
-    livePlayers.map((p) => p.color).filter(Boolean) as Color[],
+  const livePlayers = useMemo(() => players.filter((p) => !p.left), [players]);
+  const activeColorKey = useMemo(() => {
+    const set = new Set<Color>();
+    for (const p of livePlayers) {
+      if (p.color) set.add(p.color);
+    }
+    return COLORS.filter((c) => set.has(c)).join(",");
+  }, [livePlayers]);
+  const activeColors = useMemo(() => {
+    const set = new Set<Color>();
+    for (const part of activeColorKey.split(",")) {
+      if (part) set.add(part as Color);
+    }
+    return set;
+  }, [activeColorKey]);
+
+  const selectableSet = useMemo(
+    () => new Set(selectable?.pawnIndexes ?? []),
+    [selectable],
   );
-
-  const selectableSet = new Set(selectable?.pawnIndexes ?? []);
+  const selectablePlayerId = selectable?.playerId ?? null;
   const canSelect = (playerId: string, pawnIndex: number) =>
-    Boolean(selectable && selectable.playerId === playerId && selectableSet.has(pawnIndex));
+    Boolean(selectablePlayerId === playerId && selectableSet.has(pawnIndex));
 
-  const homeByCell = new Map<string, Color>();
-  for (const color of COLORS) {
-    if (!activeColors.has(color)) continue;
-    const [r, c] = homeCoordMode(boardMode, color);
-    homeByCell.set(cellKey(r, c), color);
-  }
-
-  // Path cells for travel highlight
   const pathCoords =
     travel != null
       ? pathStepCoordsMode(boardMode, travel.color, travel.from, travel.to)
@@ -136,19 +144,35 @@ export function Board({
     : null;
   const previewTheme = previewColor ? COLOR_THEME[previewColor] : null;
 
-  // Gather tokens per cell — traveling pawn uses stepPos instead of server pos.
+  const travelKey = travel
+    ? `${travel.playerId}:${travel.pawnIndex}:${travel.from}:${travel.to}`
+    : null;
+  const prevPlayersRef = useRef(players);
+  const holdCapturesRef = useRef<Map<string, number[]>>(new Map());
+  const holdKeyRef = useRef<string | null>(null);
+  if (travel && !travel.landed) {
+    if (holdKeyRef.current !== travelKey) {
+      holdCapturesRef.current = new Map(
+        prevPlayersRef.current.map((p) => [p.id, p.pawns.slice()]),
+      );
+      holdKeyRef.current = travelKey;
+    }
+  } else {
+    holdKeyRef.current = null;
+    prevPlayersRef.current = players;
+  }
+
   const byCell = new Map<string, TokenRef[]>();
   for (const p of livePlayers) {
     if (!p.color) continue;
     const color = p.color as Color;
+    const held = travel && !travel.landed ? holdCapturesRef.current.get(p.id) : undefined;
     p.pawns.forEach((pos, i) => {
       let displayPos = pos;
-      if (
-        travel &&
-        travel.playerId === p.id &&
-        travel.pawnIndex === i
-      ) {
+      if (travel && travel.playerId === p.id && travel.pawnIndex === i) {
         displayPos = travel.stepPos;
+      } else if (held && held[i] != null && held[i] !== 0 && pos === 0) {
+        displayPos = held[i]!;
       }
       const coord =
         displayPos < 0
@@ -184,14 +208,11 @@ export function Board({
   const activeColor =
     players.find((p) => p.id === activePlayerId)?.color ?? null;
 
-  const cells: { r: number; c: number }[] = [];
-  for (let r = 0; r < BOARD_SIZE; r++) {
-    for (let c = 0; c < BOARD_SIZE; c++) {
-      cells.push({ r, c });
-    }
-  }
-
   const travelTheme = travel ? COLOR_THEME[travel.color] : null;
+  const arrowColors = useMemo(
+    () => COLORS.filter((c) => activeColors.has(c)),
+    [activeColors],
+  );
 
   return (
     <div
@@ -220,81 +241,27 @@ export function Board({
         }}
       >
         <div className="relative aspect-square w-full overflow-hidden rounded-sm bg-[#e8d4b0]">
-          <div
-            className="absolute inset-0 grid"
-            style={{
-              gap: 0,
-              border: "2.5px solid #1a1208",
-              gridTemplateColumns: `repeat(${BOARD_SIZE}, 1fr)`,
-              gridTemplateRows: `repeat(${BOARD_SIZE}, 1fr)`,
-            }}
-          >
-            {cells.map(({ r, c }) => {
-              const safe = isSafeCellMode(boardMode, [r, c]);
-              const isCenter = r === CENTER_RC && c === CENTER_RC;
-              const homeColor = homeByCell.get(cellKey(r, c)) ?? null;
-              const homeTheme = homeColor ? COLOR_THEME[homeColor] : null;
-              const isActiveHome =
-                homeColor != null && homeColor === activeColor;
-              const k = cellKey(r, c);
-              const isCurrent = currentKey === k;
-              const isTrail = trailKeys.has(k);
-              const isDestLand = travel?.landed && destKey === k;
-              const isPreviewDest = previewKey === k;
-
-              let bg = zoneBaseFill(r, c, safe, isCenter, boardMode);
-              if (isDestLand && travelTheme) {
-                bg = `linear-gradient(180deg, ${travelTheme.hex}aa 0%, ${travelTheme.hex}66 100%)`;
-              } else if (isCurrent && travelTheme) {
-                bg = `linear-gradient(180deg, ${travelTheme.hex}99 0%, ${travelTheme.hex}55 100%)`;
-              } else if (isTrail && travelTheme) {
-                bg = `linear-gradient(180deg, ${travelTheme.hex}44 0%, #e2cb9e 100%)`;
-              } else if (isPreviewDest && previewTheme) {
-                bg = `linear-gradient(180deg, ${previewTheme.hex}bb 0%, ${previewTheme.hex}66 100%)`;
-              }
-
-              const travelRing =
-                isCurrent || isDestLand
-                  ? `inset 0 0 0 2.5px ${travelTheme?.hex ?? "#FFB020"}`
-                  : isPreviewDest
-                    ? `inset 0 0 0 3px ${previewTheme?.hex ?? "#FFB020"}`
-                    : undefined;
-              const centerGlow = isCenter
-                ? "inset 0 0 10px rgba(212,160,23,0.55), inset 0 0 0 2px rgba(184,134,11,0.85)"
-                : undefined;
-
-              return (
-                <div
-                  key={k}
-                  className={`relative flex items-center justify-center transition-colors duration-150 ${
-                    isActiveHome ? "animate-pulseGlow" : ""
-                  } ${isCurrent || isDestLand || isPreviewDest ? "animate-pulseGlow" : ""}`}
-                  style={{
-                    background: bg,
-                    borderRight: c < BOARD_SIZE - 1 ? "2.5px solid #1a1208" : undefined,
-                    borderBottom: r < BOARD_SIZE - 1 ? "2.5px solid #1a1208" : undefined,
-                    boxShadow: travelRing ?? centerGlow,
-                  }}
-                >
-                  {safe && (
-                    <SafeHouse
-                      color={homeTheme ? homeTheme.hex : "#000000"}
-                      heavy={isCenter}
-                      rotation={rotation}
-                    />
-                  )}
-                </div>
-              );
-            })}
-          </div>
-
-          {/* Outer→middle and middle→inner entry arrows per color in play */}
-          <InnerEntryArrows
-            colors={COLORS.filter((c) => activeColors.has(c))}
+          <StaticGrid
+            boardSize={BOARD_SIZE}
             boardMode={boardMode}
+            centerRc={CENTER_RC}
+            rotation={rotation}
+            activeColorKey={activeColorKey}
+            activeColor={activeColor}
           />
 
-          {/* Pawns — selectable ones receive clicks */}
+          <HighlightLayer
+            boardSize={BOARD_SIZE}
+            currentKey={currentKey}
+            destKey={travel?.landed ? destKey : null}
+            trailKeys={trailKeys}
+            previewKey={previewKey}
+            travelHex={travelTheme?.hex ?? null}
+            previewHex={previewTheme?.hex ?? null}
+          />
+
+          <InnerEntryArrows colors={arrowColors} boardMode={boardMode} />
+
           <div className="absolute inset-0 z-[2]">
             {tokens.map((t) => {
               const { dx, dy } = clusterOffset(t.idx, t.total);
@@ -326,21 +293,21 @@ export function Board({
                   onClick={() => {
                     if (selectablePawn && onPawnClick) onPawnClick(t.pawnIndex);
                   }}
-                  className={`absolute ${
+                  className={`absolute left-0 top-0 ${
                     selectablePawn
                       ? "pointer-events-auto cursor-pointer active:scale-95"
                       : "pointer-events-none"
-                  } ${isTraveling ? "transition-all duration-200 ease-out" : "transition-all duration-300 ease-out"}`}
+                  }`}
                   style={{
-                    left: `${left}%`,
-                    top: `${top}%`,
                     width: "10%",
                     height: "10%",
-                    transform: "translate(-50%, -50%)",
+                    transform: `translate3d(${left * 10}%, ${top * 10}%, 0) translate(-50%, -50%)`,
+                    transition: isTraveling ? "transform 140ms linear" : undefined,
                     zIndex: isSelected ? 9 : selectablePawn ? 8 : finished ? 5 : isTraveling ? 7 : 2,
                     background: "transparent",
                     border: "none",
                     padding: 0,
+                    willChange: isTraveling ? "transform" : undefined,
                   }}
                 >
                   <div className="flex h-full w-full items-center justify-center">
@@ -360,7 +327,6 @@ export function Board({
             })}
           </div>
 
-          {/* Destination confirm — sits above pawns so the landing cell is always tappable */}
           {previewDest && onDestClick && (
             <button
               type="button"
@@ -382,11 +348,170 @@ export function Board({
       </div>
     </div>
   );
-}
+});
+
+const StaticGrid = memo(function StaticGrid({
+  boardSize,
+  boardMode,
+  centerRc,
+  rotation,
+  activeColorKey,
+  activeColor,
+}: {
+  boardSize: number;
+  boardMode: BoardMode;
+  centerRc: number;
+  rotation: number;
+  activeColorKey: string;
+  activeColor: Color | null;
+}) {
+  const homeByCell = new Map<string, Color>();
+  for (const part of activeColorKey.split(",")) {
+    if (!part) continue;
+    const color = part as Color;
+    const [r, c] = homeCoordMode(boardMode, color);
+    homeByCell.set(cellKey(r, c), color);
+  }
+  const cells: { r: number; c: number }[] = [];
+  for (let r = 0; r < boardSize; r++) {
+    for (let c = 0; c < boardSize; c++) {
+      cells.push({ r, c });
+    }
+  }
+
+  return (
+    <div
+      className="absolute inset-0 grid"
+      style={{
+        gap: 0,
+        border: "2.5px solid #1a1208",
+        gridTemplateColumns: `repeat(${boardSize}, 1fr)`,
+        gridTemplateRows: `repeat(${boardSize}, 1fr)`,
+      }}
+    >
+      {cells.map(({ r, c }) => {
+        const safe = isSafeCellMode(boardMode, [r, c]);
+        const isCenter = r === centerRc && c === centerRc;
+        const k = cellKey(r, c);
+        const homeColor = homeByCell.get(k) ?? null;
+        const homeTheme = homeColor ? COLOR_THEME[homeColor] : null;
+        const isActiveHome = homeColor != null && homeColor === activeColor;
+        const bg = zoneBaseFill(r, c, safe, isCenter, boardMode);
+        const centerGlow = isCenter
+          ? "inset 0 0 10px rgba(212,160,23,0.55), inset 0 0 0 2px rgba(184,134,11,0.85)"
+          : undefined;
+
+        return (
+          <div
+            key={k}
+            className="relative flex items-center justify-center"
+            style={{
+              background: bg,
+              borderRight: c < boardSize - 1 ? "2.5px solid #1a1208" : undefined,
+              borderBottom: r < boardSize - 1 ? "2.5px solid #1a1208" : undefined,
+              boxShadow: centerGlow,
+            }}
+          >
+            {isActiveHome && (
+              <div
+                className="pointer-events-none absolute inset-0 animate-pulseGlow"
+                aria-hidden="true"
+              />
+            )}
+            {safe && (
+              <SafeHouse
+                color={homeTheme ? homeTheme.hex : "#000000"}
+                heavy={isCenter}
+                rotation={rotation}
+              />
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+});
+
+const HighlightLayer = memo(function HighlightLayer({
+  boardSize,
+  currentKey,
+  destKey,
+  trailKeys,
+  previewKey,
+  travelHex,
+  previewHex,
+}: {
+  boardSize: number;
+  currentKey: string | null;
+  destKey: string | null;
+  trailKeys: Set<string>;
+  previewKey: string | null;
+  travelHex: string | null;
+  previewHex: string | null;
+}) {
+  const keys = new Set<string>();
+  if (currentKey) keys.add(currentKey);
+  if (destKey) keys.add(destKey);
+  if (previewKey) keys.add(previewKey);
+  for (const k of trailKeys) keys.add(k);
+  if (keys.size === 0) return null;
+
+  const cell = 100 / boardSize;
+
+  return (
+    <div className="pointer-events-none absolute inset-0 z-[1]">
+      {[...keys].map((k) => {
+        const [rs, cs] = k.split("-");
+        const r = Number(rs);
+        const c = Number(cs);
+        const isCurrent = currentKey === k;
+        const isDest = destKey === k;
+        const isTrail = trailKeys.has(k);
+        const isPreview = previewKey === k;
+        const hex = isPreview ? previewHex : travelHex;
+        if (!hex) return null;
+        const bg =
+          isDest || isCurrent
+            ? `linear-gradient(180deg, ${hex}aa 0%, ${hex}66 100%)`
+            : isPreview
+              ? `linear-gradient(180deg, ${hex}bb 0%, ${hex}66 100%)`
+              : isTrail
+                ? `linear-gradient(180deg, ${hex}44 0%, #e2cb9e 100%)`
+                : undefined;
+        return (
+          <div
+            key={k}
+            className="absolute"
+            style={{
+              left: `${c * cell}%`,
+              top: `${r * cell}%`,
+              width: `${cell}%`,
+              height: `${cell}%`,
+              background: bg,
+              boxShadow:
+                isCurrent || isDest
+                  ? `inset 0 0 0 2.5px ${hex}`
+                  : isPreview
+                    ? `inset 0 0 0 3px ${hex}`
+                    : undefined,
+            }}
+          >
+            {(isCurrent || isDest || isPreview) && (
+              <div
+                className="absolute inset-0 animate-pulseGlow"
+                aria-hidden="true"
+              />
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+});
 
 const SELECT_STROKE = "#2ec4b6";
 
-function PawnToken({
+const PawnToken = memo(function PawnToken({
   color,
   shape,
   tokenKey,
@@ -405,7 +530,6 @@ function PawnToken({
   const theme = COLOR_THEME[color];
   const OUTLINE = "#000000";
   void tokenKey;
-  // Triangles (and stars) have a clear "up"; undo board seat rotation.
   const keepUpright = shape === "triangle" || shape === "star";
   const upright =
     keepUpright && rotation ? { transform: `rotate(${-rotation}deg)` } : undefined;
@@ -413,9 +537,10 @@ function PawnToken({
     <div
       className="relative h-full w-full"
       style={{
-        filter: finished
-          ? `drop-shadow(0 0 6px ${theme.hex})`
-          : "drop-shadow(0 2px 3px rgba(26,18,8,0.45))",
+        boxShadow: finished
+          ? `0 0 6px ${theme.hex}`
+          : "0 2px 3px rgba(26,18,8,0.45)",
+        borderRadius: shape === "circle" ? "999px" : 6,
         ...upright,
       }}
     >
@@ -503,7 +628,7 @@ function PawnToken({
       </svg>
     </div>
   );
-}
+});
 
 /** Small legend of each player's pocket (un-entered) and finished pawns. */
 export function Pockets({

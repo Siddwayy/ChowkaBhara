@@ -1,14 +1,19 @@
+import { useCountdown } from "../../lib/useGameSocket";
+
 export function StatusStrip({
   turnName,
   isMyTurn = false,
   roll,
-  seconds,
+  phaseEndsAt = null,
 }: {
   turnName?: string | null;
   isMyTurn?: boolean;
   roll?: number | null;
-  seconds?: number | null;
+  phaseEndsAt?: number | null;
 }) {
+  const seconds = useCountdown(phaseEndsAt);
+  const showTimer = seconds > 0;
+
   return (
     <div className="flex shrink-0 flex-nowrap items-center gap-1.5 rounded-xl bg-surface/15 px-2.5 py-1.5 text-xs text-surface backdrop-blur-sm sm:gap-2 sm:rounded-2xl sm:px-3 sm:py-2 sm:text-sm">
       {turnName != null && (
@@ -31,12 +36,25 @@ export function StatusStrip({
       </span>
       <span
         className={`ml-auto rounded-full bg-surface px-2.5 py-0.5 font-display font-semibold tabular-nums text-ink sm:px-3 sm:py-1 ${
-          seconds != null && seconds > 0 ? "" : "invisible"
+          showTimer ? "" : "invisible"
         }`}
-        aria-hidden={seconds == null || seconds <= 0}
+        aria-hidden={!showTimer}
       >
-        {seconds != null && seconds > 0 ? `${seconds}s` : "0s"}
+        {showTimer ? `${seconds}s` : "0s"}
       </span>
     </div>
   );
+}
+
+/** Isolated 1 Hz countdown so parent trees (board) do not re-render. */
+export function PhaseCountdown({
+  phaseEndsAt,
+  className = "mt-3 text-center text-sm text-surface/50",
+}: {
+  phaseEndsAt: number | null;
+  className?: string;
+}) {
+  const seconds = useCountdown(phaseEndsAt);
+  if (seconds <= 0) return null;
+  return <p className={className}>{seconds}s</p>;
 }

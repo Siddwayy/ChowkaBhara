@@ -24,6 +24,7 @@ const MUTE_KEY = "chowka_muted";
 
 let ctx: AudioContext | null = null;
 let master: GainNode | null = null;
+let mutedCache: boolean | null = null;
 
 function getContext(): AudioContext | null {
   if (typeof window === "undefined") return null;
@@ -53,11 +54,14 @@ export function unlockAudio(): void {
 }
 
 export function isMuted(): boolean {
+  if (mutedCache != null) return mutedCache;
   if (typeof localStorage === "undefined") return false;
-  return localStorage.getItem(MUTE_KEY) === "1";
+  mutedCache = localStorage.getItem(MUTE_KEY) === "1";
+  return mutedCache;
 }
 
 export function setMuted(muted: boolean): boolean {
+  mutedCache = muted;
   if (typeof localStorage !== "undefined") {
     localStorage.setItem(MUTE_KEY, muted ? "1" : "0");
   }

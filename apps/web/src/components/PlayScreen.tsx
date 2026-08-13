@@ -1,9 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   COLORS,
   PAWN_SHAPES,
   TRAVEL_SETTLE_MS,
-  TRAVEL_STEP_MS,
   coordForMode,
   destForPawn,
   oppositeColor,
@@ -12,9 +11,10 @@ import {
   type Coord,
   type PawnShape,
   type PlayerView,
+  type ServerMessage,
 } from "@chowka/shared";
 import { getOrCreatePlayerId } from "../lib/serverUrl";
-import { useCountdown, useGameSocket } from "../lib/useGameSocket";
+import { useGameSocket } from "../lib/useGameSocket";
 import { useAudio, usePhaseSound } from "../lib/useAudio";
 import { useTravelAnimation } from "../lib/useTravelAnimation";
 import { COLOR_THEME } from "../lib/colors";
@@ -47,44 +47,13 @@ export function PlayScreen({
   const maxSent = useRef(false);
   const modeSent = useRef(false);
 
-  const { view, status, lastError, events, send, setLastError } = useGameSocket({
-    code,
-    role: "player",
-    playerId,
-    playerName,
-  });
-
   const { muted, toggleMute, play } = useAudio();
-  const playerView = view?.role === "player" ? view : null;
-  const seconds = useCountdown(playerView?.phaseEndsAt ?? null);
   const [isRolling, setIsRolling] = useState(false);
   const [settleDice, setSettleDice] = useState(false);
   const threwSelf = useRef(false);
 
-  usePhaseSound(playerView?.phase, play);
-
-  useEffect(() => {
-    if (!settleDice) return;
-    const t = window.setTimeout(() => setSettleDice(false), 550);
-    return () => window.clearTimeout(t);
-  }, [settleDice]);
-
-  // Clear tumble once we've left the throw-in-progress window.
-  useEffect(() => {
-    const phase = playerView?.phase;
-    if (phase === "move" || phase === "resolution" || phase === "endgame" || phase === "lobby") {
-      setIsRolling(false);
-    }
-    if (phase && phase !== "roll") {
-      threwSelf.current = false;
-    }
-  }, [playerView?.phase]);
-
-  const processedEvents = useRef(0);
-  useEffect(() => {
-    for (let i = processedEvents.current; i < events.length; i++) {
-      const msg = events[i];
-      if (!msg || msg.type !== "event") continue;
+  const onSocketEvent = useCallback(
+    (msg: Extract<ServerMessage, { type: "event" }>) => {
       switch (msg.event.kind) {
         case "rolled": {
           const selfThrow = threwSelf.current;
@@ -114,43 +83,38 @@ export function PlayScreen({
           play("capture");
           break;
       }
-    }
-    processedEvents.current = events.length;
-  }, [events, play, playerId]);
+    },
+    [play, playerId],
+  );
 
-  // Drive the resolution phase from the active player's client once the pawn
-  // travel animation has finished. The server keeps a phase alarm as a
-  // fallback, but relying on that alarm alone caused intermittent stalls on the
-  // "Watch the path" screen (short Durable Object alarms can fire late).
-  const advanceSentRef = useRef<string | null>(null);
+  const { view, status, lastError, send, setLastError } = useGameSocket({
+    code,
+    role: "player",
+    playerId,
+    playerName,
+    onEvent: onSocketEvent,
+  });
+
+  const playerView = view?.role === "player" ? view : null;
+
+  usePhaseSound(playerView?.phase, play);
+
   useEffect(() => {
-    if (!playerView) return;
-    if (playerView.phase !== "resolution" || playerView.paused) {
-      advanceSentRef.current = null;
-      return;
+    if (!settleDice) return;
+    const t = window.setTimeout(() => setSettleDice(false), 550);
+    return () => window.clearTimeout(t);
+  }, [settleDice]);
+
+  // Clear tumble once we've left the throw-in-progress window.
+  useEffect(() => {
+    const phase = playerView?.phase;
+    if (phase === "move" || phase === "resolution" || phase === "endgame" || phase === "lobby") {
+      setIsRolling(false);
     }
-    if (playerView.activePlayerId !== playerView.myPlayerId) return;
-    const lm = playerView.lastMove;
-    const steps = lm ? Math.max(1, lm.to - Math.max(0, lm.from)) : 1;
-    const key = lm
-      ? `${lm.playerId}:${lm.pawnIndex}:${lm.from}:${lm.to}`
-      : `skip:${playerView.currentRoll}:${playerView.activePlayerId}`;
-    if (advanceSentRef.current === key) return;
-    advanceSentRef.current = key;
-    const delay = steps * TRAVEL_STEP_MS + TRAVEL_SETTLE_MS;
-    const timer = window.setTimeout(() => {
-      send({ type: "advanceResolution" });
-    }, delay);
-    return () => window.clearTimeout(timer);
-  }, [
-    playerView?.phase,
-    playerView?.paused,
-    playerView?.activePlayerId,
-    playerView?.myPlayerId,
-    playerView?.lastMove,
-    playerView?.currentRoll,
-    send,
-  ]);
+    if (phase && phase !== "roll") {
+      threwSelf.current = false;
+    }
+  }, [playerView?.phase]);
 
   useEffect(() => {
     if (desiredMax == null || maxSent.current) return;
@@ -179,6 +143,75 @@ export function PlayScreen({
     playerView?.boardMode,
     send,
   ]);
+
+  const onSetColor = useCallback(
+    (c: Color) => {
+      play("tap");
+      send({ type: "setColor", color: c });
+    },
+    [play, send],
+  );
+  const onSetShape = useCallback(
+    (s: PawnShape) => {
+      play("tap");
+      send({ type: "setShape", shape: s });
+    },
+    [play, send],
+  );
+  const onReady = useCallback(
+    (ready: boolean) => {
+      play(ready ? "ready" : "unready");
+      send({ type: "setReady", ready });
+    },
+    [play, send],
+  );
+  const onStart = useCallback(() => {
+    play("start");
+    send({ type: "startGame" });
+  }, [play, send]);
+  const onThrow = useCallback(() => {
+    threwSelf.current = true;
+    if (!send({ type: "throwShells" })) {
+      threwSelf.current = false;
+      return;
+    }
+    setIsRolling(true);
+    setSettleDice(false);
+    play("roll");
+    if (typeof navigator !== "undefined" && navigator.vibrate) navigator.vibrate(30);
+  }, [play, send]);
+  const onMove = useCallback(
+    (pawnIndex: number) => {
+      play("tap");
+      send({ type: "movePawn", pawnIndex });
+    },
+    [play, send],
+  );
+  const onSkip = useCallback(() => {
+    play("tap");
+    send({ type: "skipTurn" });
+  }, [play, send]);
+  const onRematch = useCallback(() => {
+    play("tap");
+    send({ type: "rematch" });
+  }, [play, send]);
+  const onPause = useCallback(() => {
+    play("tap");
+    send({ type: "pauseGame" });
+  }, [play, send]);
+  const onResume = useCallback(() => {
+    play("tap");
+    send({ type: "resumeGame" });
+  }, [play, send]);
+  const onExit = useCallback(() => {
+    play("tap");
+    send({ type: "exitGame" });
+    window.location.href = "/";
+  }, [play, send]);
+  const onShowRules = useCallback(() => setShowRules(true), []);
+  const onAdvance = useCallback(() => {
+    send({ type: "advanceResolution" });
+  }, [send]);
 
   function acceptRules() {
     acknowledgeRules(code);
@@ -249,63 +282,22 @@ export function PlayScreen({
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <PlayerBody
           view={playerView}
-          seconds={seconds}
           rulesOk={rulesOk}
           isRolling={isRolling}
           settleDice={settleDice}
-          onSetColor={(c) => {
-            play("tap");
-            send({ type: "setColor", color: c });
-          }}
-          onSetShape={(s) => {
-            play("tap");
-            send({ type: "setShape", shape: s });
-          }}
-          onReady={(ready) => {
-            play(ready ? "ready" : "unready");
-            send({ type: "setReady", ready });
-          }}
-          onStart={() => {
-            play("start");
-            send({ type: "startGame" });
-          }}
-          onThrow={() => {
-            threwSelf.current = true;
-            if (!send({ type: "throwShells" })) {
-              threwSelf.current = false;
-              return;
-            }
-            setIsRolling(true);
-            setSettleDice(false);
-            play("roll");
-            if (typeof navigator !== "undefined" && navigator.vibrate) navigator.vibrate(30);
-          }}
-          onMove={(pawnIndex) => {
-            play("tap");
-            send({ type: "movePawn", pawnIndex });
-          }}
-          onSkip={() => {
-            play("tap");
-            send({ type: "skipTurn" });
-          }}
-          onRematch={() => {
-            play("tap");
-            send({ type: "rematch" });
-          }}
-          onPause={() => {
-            play("tap");
-            send({ type: "pauseGame" });
-          }}
-          onResume={() => {
-            play("tap");
-            send({ type: "resumeGame" });
-          }}
-          onExit={() => {
-            play("tap");
-            send({ type: "exitGame" });
-            window.location.href = "/";
-          }}
-          onShowRules={() => setShowRules(true)}
+          onSetColor={onSetColor}
+          onSetShape={onSetShape}
+          onReady={onReady}
+          onStart={onStart}
+          onThrow={onThrow}
+          onMove={onMove}
+          onSkip={onSkip}
+          onRematch={onRematch}
+          onPause={onPause}
+          onResume={onResume}
+          onExit={onExit}
+          onShowRules={onShowRules}
+          onAdvance={onAdvance}
         />
         </div>
       )}
@@ -315,7 +307,6 @@ export function PlayScreen({
 
 function PlayerBody({
   view,
-  seconds,
   rulesOk,
   isRolling,
   settleDice,
@@ -331,9 +322,9 @@ function PlayerBody({
   onResume,
   onExit,
   onShowRules,
+  onAdvance,
 }: {
   view: PlayerView;
-  seconds: number;
   rulesOk: boolean;
   isRolling: boolean;
   settleDice: boolean;
@@ -349,6 +340,7 @@ function PlayerBody({
   onResume: () => void;
   onExit: () => void;
   onShowRules: () => void;
+  onAdvance: () => void;
 }) {
   const activeName = view.players.find((p) => p.id === view.activePlayerId)?.name ?? "…";
   const me = view.players.find((p) => p.id === view.myPlayerId);
@@ -356,10 +348,41 @@ function PlayerBody({
   const [pendingPawn, setPendingPawn] = useState<number | null>(null);
   const travel = useTravelAnimation(view.lastMove, view.players, view.phase);
 
-  const selectable =
-    view.phase === "move" && view.isMyTurn && view.myValidMoves.length > 0
-      ? { playerId: view.myPlayerId, pawnIndexes: view.myValidMoves }
-      : null;
+  const selectable = useMemo(
+    () =>
+      view.phase === "move" && view.isMyTurn && view.myValidMoves.length > 0
+        ? { playerId: view.myPlayerId, pawnIndexes: view.myValidMoves }
+        : null,
+    [view.phase, view.isMyTurn, view.myPlayerId, view.myValidMoves],
+  );
+
+  // Drive resolution from the actual land time (not a parallel timeout).
+  const advanceSentRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (view.phase !== "resolution" || view.paused) {
+      advanceSentRef.current = null;
+      return;
+    }
+    if (view.activePlayerId !== view.myPlayerId) return;
+    const lm = view.lastMove;
+    if (lm && !travel?.landed) return;
+    const key = lm
+      ? `${lm.playerId}:${lm.pawnIndex}:${lm.from}:${lm.to}`
+      : `skip:${view.currentRoll}:${view.activePlayerId}`;
+    if (advanceSentRef.current === key) return;
+    advanceSentRef.current = key;
+    const timer = window.setTimeout(onAdvance, TRAVEL_SETTLE_MS);
+    return () => window.clearTimeout(timer);
+  }, [
+    view.phase,
+    view.paused,
+    view.activePlayerId,
+    view.myPlayerId,
+    view.lastMove,
+    view.currentRoll,
+    travel?.landed,
+    onAdvance,
+  ]);
 
   // Clear pending selection when the move context changes.
   useEffect(() => {
@@ -387,16 +410,16 @@ function PlayerBody({
       ? { playerId: view.myPlayerId, pawnIndex: pendingPawn }
       : null;
 
-  const handlePawnClick = (pawnIndex: number) => {
+  const handlePawnClick = useCallback((pawnIndex: number) => {
     setPendingPawn((prev) => (prev === pawnIndex ? null : pawnIndex));
-  };
+  }, []);
 
-  const handleDestClick = () => {
+  const handleDestClick = useCallback(() => {
     if (pendingPawn == null) return;
     const idx = pendingPawn;
     setPendingPawn(null);
     onMove(idx);
-  };
+  }, [pendingPawn, onMove]);
 
   if (view.phase === "lobby") {
     const connected = view.players.filter((p) => p.connected).length;
@@ -631,7 +654,7 @@ function PlayerBody({
         turnName={activeName}
         isMyTurn={view.isMyTurn}
         roll={view.phase === "move" || view.phase === "resolution" ? view.currentRoll : null}
-        seconds={view.isMyTurn && !view.paused && seconds > 0 ? seconds : null}
+        phaseEndsAt={view.isMyTurn && !view.paused ? view.phaseEndsAt : null}
       />
 
       <div className="flex min-h-0 w-full flex-1 items-center justify-center overflow-hidden [container-type:size]">

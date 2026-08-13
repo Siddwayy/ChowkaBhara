@@ -15,6 +15,16 @@ interface Options {
   playerId?: string;
   autoJoin?: boolean;
   playerName?: string;
+  onEvent?: (msg: Extract<ServerMessage, { type: "event" }>) => void;
+}
+
+function parseServerMessage(raw: unknown): ServerMessage | null {
+  if (import.meta.env.DEV) {
+    const parsed = ServerMessageSchema.safeParse(raw);
+    return parsed.success ? parsed.data : null;
+  }
+  if (!raw || typeof raw !== "object" || !("type" in raw)) return null;
+  return raw as ServerMessage;
 }
 
 export function useGameSocket({
@@ -23,13 +33,15 @@ export function useGameSocket({
   playerId,
   autoJoin = true,
   playerName,
+  onEvent,
 }: Options) {
   const [view, setView] = useState<RoomView | null>(null);
   const [status, setStatus] = useState<"connecting" | "open" | "closed">("connecting");
   const [lastError, setLastError] = useState<string | null>(null);
-  const [events, setEvents] = useState<ServerMessage[]>([]);
   const wsRef = useRef<WebSocket | null>(null);
   const joinedRef = useRef(false);
+  const onEventRef = useRef(onEvent);
+  onEventRef.current = onEvent;
 
   const send = useCallback((msg: ClientMessage): boolean => {
     const ws = wsRef.current;
@@ -44,6 +56,7 @@ export function useGameSocket({
   useEffect(() => {
     let cancelled = false;
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
+    let retryDelay = 1500;
     joinedRef.current = false;
 
     const connect = () => {
@@ -61,6 +74,7 @@ export function useGameSocket({
 
       ws.onopen = () => {
         if (cancelled) return;
+        retryDelay = 1500;
         setStatus("open");
         if (autoJoin && role === "player" && playerId && !joinedRef.current) {
           joinedRef.current = true;
@@ -86,19 +100,14 @@ export function useGameSocket({
       ws.onmessage = (ev) => {
         try {
           const raw = JSON.parse(String(ev.data));
-          const parsed = ServerMessageSchema.safeParse(raw);
-          if (!parsed.success) {
-            // Reject invalid payloads instead of casting partial state into React.
-            return;
-          }
-          const msg = parsed.data;
+          const msg = parseServerMessage(raw);
+          if (!msg) return;
           if (msg.type === "state") {
             setView(msg.view);
           } else if (msg.type === "event") {
-            setEvents((prev) => [...prev.slice(-30), msg]);
+            onEventRef.current?.(msg);
             if (msg.event.kind === "error") {
               setLastError(msg.event.message);
-              // Allow a fresh join attempt after a rejected name (or similar).
               if (/already taken|Room is full|already in progress/i.test(msg.event.message)) {
                 joinedRef.current = false;
               }
@@ -113,11 +122,14 @@ export function useGameSocket({
         if (cancelled) return;
         setStatus("closed");
         joinedRef.current = false;
-        retryTimer = setTimeout(connect, 1500);
+        const jitter = Math.random() * 300;
+        const wait = retryDelay + jitter;
+        retryDelay = Math.min(retryDelay * 2, 12_000);
+        retryTimer = setTimeout(connect, wait);
       };
 
       ws.onerror = () => {
-        ws.close();
+        // onclose already reconnects; avoid a double-close storm.
       };
     };
 
@@ -131,7 +143,7 @@ export function useGameSocket({
     };
   }, [code, role, playerId, autoJoin, playerName]);
 
-  return { view, status, lastError, events, send, setLastError };
+  return { view, status, lastError, send, setLastError };
 }
 
 export function useCountdown(phaseEndsAt: number | null): number {
@@ -147,7 +159,6 @@ export function useCountdown(phaseEndsAt: number | null): number {
       setRemaining((prev) => (prev === next ? prev : next));
     };
     tick();
-    // 1s is enough for a whole-second display and avoids thrashing the board.
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
   }, [phaseEndsAt]);

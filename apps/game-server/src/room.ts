@@ -5,7 +5,7 @@ import {
   PAWN_SHAPES,
   PAWNS_PER_PLAYER,
   RECONNECT_GRACE_MS,
-  RESOLUTION_MS,
+  RESOLUTION_ALARM_SLACK_MS,
   TRAVEL_SETTLE_MS,
   resolutionMsForSteps,
   ROLL_TIMEOUT_MS,
@@ -242,8 +242,6 @@ export class RoomDurableObject implements DurableObject {
   }
 
   private canStart(): boolean {
-    const pruned = this.pruneStaleLobbyPlayers();
-    if (pruned) void this.persist();
     const expected = this.room.expectedPlayerCount;
     if (this.room.phase !== "lobby" || expected === null) return false;
     const connected = this.room.players.filter((p) => p.connected);
@@ -325,46 +323,54 @@ export class RoomDurableObject implements DurableObject {
     return this.getPlayer(this.room.pausedById)?.name ?? null;
   }
 
-  private buildHostView(): HostView {
+  private sharedViewFields(
+    players: PlayerPublic[],
+    canStart: boolean,
+    pausedByName: string | null,
+  ) {
     return {
-      role: "host",
       code: this.room.code,
       phase: this.room.phase,
-      players: this.toPublicPlayers(),
+      players,
       activePlayerId: this.room.activePlayerId,
       currentRoll: this.room.currentRoll,
       lastMove: this.room.lastMove,
       phaseEndsAt: this.room.phaseEndsAt,
-      canStart: this.canStart(),
+      canStart,
       expectedPlayerCount: this.room.expectedPlayerCount,
       boardMode: this.room.boardMode,
       gameOver: this.room.gameOver,
       paused: this.room.paused,
-      pausedByName: this.pausedByName(),
+      pausedByName,
     };
   }
 
-  private buildPlayerView(playerId: string): PlayerView | null {
+  private buildHostView(): HostView {
+    return {
+      role: "host",
+      ...this.sharedViewFields(
+        this.toPublicPlayers(),
+        this.canStart(),
+        this.pausedByName(),
+      ),
+    };
+  }
+
+  private buildPlayerView(
+    playerId: string,
+    shared?: ReturnType<RoomDurableObject["sharedViewFields"]>,
+  ): PlayerView | null {
     const me = this.getPlayer(playerId);
     if (!me) return null;
     const isMyTurn =
       this.room.activePlayerId === me.id &&
       (this.room.phase === "roll" || this.room.phase === "move");
+    const base =
+      shared ??
+      this.sharedViewFields(this.toPublicPlayers(), this.canStart(), this.pausedByName());
     return {
       role: "player",
-      code: this.room.code,
-      phase: this.room.phase,
-      players: this.toPublicPlayers(),
-      activePlayerId: this.room.activePlayerId,
-      currentRoll: this.room.currentRoll,
-      lastMove: this.room.lastMove,
-      phaseEndsAt: this.room.phaseEndsAt,
-      canStart: this.canStart(),
-      expectedPlayerCount: this.room.expectedPlayerCount,
-      boardMode: this.room.boardMode,
-      gameOver: this.room.gameOver,
-      paused: this.room.paused,
-      pausedByName: this.pausedByName(),
+      ...base,
       myPlayerId: me.id,
       myColor: me.color,
       myShape: me.shape,
@@ -375,23 +381,44 @@ export class RoomDurableObject implements DurableObject {
     };
   }
 
-  private send(ws: WebSocket, msg: ServerMessage): void {
+  private sendRaw(ws: WebSocket, raw: string): void {
     try {
-      ws.send(JSON.stringify(msg));
+      ws.send(raw);
     } catch {
       /* closed */
     }
   }
 
+  private send(ws: WebSocket, msg: ServerMessage): void {
+    this.sendRaw(ws, JSON.stringify(msg));
+  }
+
   private broadcastState(): void {
-    const pruned = this.pruneStaleLobbyPlayers();
-    if (pruned) void this.persist();
+    this.pruneStaleLobbyPlayers();
+    const players = this.toPublicPlayers();
+    const canStart = this.canStart();
+    const pausedByName = this.pausedByName();
+    const shared = this.sharedViewFields(players, canStart, pausedByName);
+
+    let hostRaw: string | null = null;
+    const playerRaw = new Map<string, string>();
+
     for (const [ws, meta] of this.sessions) {
       if (meta.role === "host") {
-        this.send(ws, { type: "state", view: this.buildHostView() });
+        if (!hostRaw) {
+          const view: HostView = { role: "host", ...shared };
+          hostRaw = JSON.stringify({ type: "state", view } satisfies ServerMessage);
+        }
+        this.sendRaw(ws, hostRaw);
       } else if (meta.playerId) {
-        const view = this.buildPlayerView(meta.playerId);
-        if (view) this.send(ws, { type: "state", view });
+        let raw = playerRaw.get(meta.playerId);
+        if (!raw) {
+          const view = this.buildPlayerView(meta.playerId, shared);
+          if (!view) continue;
+          raw = JSON.stringify({ type: "state", view } satisfies ServerMessage);
+          playerRaw.set(meta.playerId, raw);
+        }
+        this.sendRaw(ws, raw);
       }
     }
   }
@@ -399,22 +426,30 @@ export class RoomDurableObject implements DurableObject {
   private broadcastEvent(
     event: Extract<ServerMessage, { type: "event" }>["event"],
   ): void {
-    const msg: ServerMessage = { type: "event", event };
-    for (const [ws] of this.sessions) this.send(ws, msg);
+    const raw = JSON.stringify({ type: "event", event } satisfies ServerMessage);
+    for (const [ws] of this.sessions) this.sendRaw(ws, raw);
   }
 
   private async setPhase(phase: Phase, durationMs: number | null): Promise<void> {
     this.room.phase = phase;
     if (durationMs !== null) {
       this.room.phaseEndsAt = Date.now() + durationMs;
-      await this.state.storage.setAlarm(this.room.phaseEndsAt);
     } else {
       this.room.phaseEndsAt = null;
-      await this.state.storage.deleteAlarm();
     }
-    this.broadcastEvent({ kind: "phaseChanged", phase });
     this.broadcastState();
-    await this.persist();
+    await Promise.all([
+      durationMs !== null
+        ? this.state.storage.setAlarm(this.room.phaseEndsAt!)
+        : this.state.storage.deleteAlarm(),
+      this.persist(),
+    ]);
+  }
+
+  private resolutionDurationMs(): number {
+    const lm = this.room.lastMove;
+    if (!lm) return TRAVEL_SETTLE_MS + RESOLUTION_ALARM_SLACK_MS;
+    return resolutionMsForSteps(Math.max(1, lm.to - Math.max(0, lm.from)));
   }
 
   /** Restart the timer for the current phase (used when resuming from pause). */
@@ -425,7 +460,7 @@ export class RoomDurableObject implements DurableObject {
     } else if (this.room.phase === "move") {
       durationMs = this.moveTimeoutMs();
     } else if (this.room.phase === "resolution") {
-      durationMs = RESOLUTION_MS;
+      durationMs = this.resolutionDurationMs();
     }
     if (durationMs !== null) {
       this.room.phaseEndsAt = Date.now() + durationMs;
@@ -609,7 +644,7 @@ export class RoomDurableObject implements DurableObject {
     if (this.room.activePlayerId !== playerId) return;
     this.room.bonusPending = false;
     this.room.lastMove = null;
-    await this.setPhase("resolution", TRAVEL_SETTLE_MS);
+    await this.setPhase("resolution", TRAVEL_SETTLE_MS + RESOLUTION_ALARM_SLACK_MS);
   }
 
   private nextConnectedAfter(id: string | null): string | null {
@@ -733,11 +768,7 @@ export class RoomDurableObject implements DurableObject {
   }
 
   async alarm(): Promise<void> {
-    if (this.room.paused) {
-      // One-shot alarm was consumed; keep a short wake so pause can't soft-lock.
-      await this.state.storage.setAlarm(Date.now() + 2000);
-      return;
-    }
+    if (this.room.paused) return;
     switch (this.room.phase) {
       case "roll":
         await this.doRoll();
@@ -819,22 +850,7 @@ export class RoomDurableObject implements DurableObject {
       };
       server.serializeAttachment(meta);
       this.sessions.set(server, meta);
-
-      if (role === "host") {
-        this.send(server, { type: "state", view: this.buildHostView() });
-      } else if (meta.playerId) {
-        const existing = this.room.players.find((p) => p.id === meta.playerId);
-        if (existing) {
-          existing.connected = true;
-          existing.disconnectAt = null;
-          this.send(server, {
-            type: "state",
-            view: this.buildPlayerView(existing.id)!,
-          });
-          this.broadcastState();
-          await this.persist();
-        }
-      }
+      // Client sends join/reconnect immediately; avoid a duplicate snapshot fan-out.
 
       return new Response(null, { status: 101, webSocket: client });
     }
@@ -872,9 +888,13 @@ export class RoomDurableObject implements DurableObject {
     this.sessions.delete(ws);
     if (!meta?.playerId || meta.role === "host") return;
 
-    const stillConnected = [...this.sessions.values()].some(
-      (m) => m.playerId === meta.playerId && m.role === "player",
-    );
+    let stillConnected = false;
+    for (const m of this.sessions.values()) {
+      if (m.playerId === meta.playerId && m.role === "player") {
+        stillConnected = true;
+        break;
+      }
+    }
     if (stillConnected) return;
 
     const player = this.room.players.find((p) => p.id === meta.playerId);
@@ -893,8 +913,8 @@ export class RoomDurableObject implements DurableObject {
       this.broadcastEvent({ kind: "resumed" });
     }
 
-    await this.persist();
     this.broadcastState();
+    await this.persist();
   }
 
   async webSocketError(ws: WebSocket): Promise<void> {
@@ -1010,8 +1030,8 @@ export class RoomDurableObject implements DurableObject {
         ws.serializeAttachment(meta);
         this.sessions.set(ws, meta);
         this.ensureHost();
-        await this.persist();
         this.broadcastState();
+        await this.persist();
         break;
       }
 
@@ -1038,8 +1058,8 @@ export class RoomDurableObject implements DurableObject {
           return;
         }
         me.name = nextName;
-        await this.persist();
         this.broadcastState();
+        await this.persist();
         break;
       }
 
@@ -1055,8 +1075,8 @@ export class RoomDurableObject implements DurableObject {
           if (other) other.color = oppositeColor(msg.color);
           me.ready = false;
           if (other) other.ready = false;
-          await this.persist();
           this.broadcastState();
+          await this.persist();
           break;
         }
 
@@ -1069,8 +1089,8 @@ export class RoomDurableObject implements DurableObject {
         }
         me.color = msg.color;
         me.ready = false;
-        await this.persist();
         this.broadcastState();
+        await this.persist();
         break;
       }
 
@@ -1087,8 +1107,8 @@ export class RoomDurableObject implements DurableObject {
         }
         me.shape = msg.shape;
         me.ready = false;
-        await this.persist();
         this.broadcastState();
+        await this.persist();
         break;
       }
 
@@ -1133,8 +1153,8 @@ export class RoomDurableObject implements DurableObject {
           this.clearAllReady();
           if (count === 2) this.seatTwoPlayerOpposites();
         }
-        await this.persist();
         this.broadcastState();
+        await this.persist();
         break;
       }
 
@@ -1173,8 +1193,8 @@ export class RoomDurableObject implements DurableObject {
           this.room.boardMode = msg.mode;
           this.clearAllReady();
         }
-        await this.persist();
         this.broadcastState();
+        await this.persist();
         break;
       }
 
@@ -1197,8 +1217,8 @@ export class RoomDurableObject implements DurableObject {
           return;
         }
         me.ready = Boolean(msg.ready);
-        await this.persist();
         this.broadcastState();
+        await this.persist();
         break;
       }
 
@@ -1346,8 +1366,8 @@ export class RoomDurableObject implements DurableObject {
           if (this.room.expectedPlayerCount === 2) this.seatTwoPlayerOpposites();
           this.ensureHost();
           this.broadcastEvent({ kind: "playerLeft", playerId: me.id, name: me.name });
-          await this.persist();
           this.broadcastState();
+          await this.persist();
           break;
         }
 
