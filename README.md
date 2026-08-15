@@ -12,7 +12,7 @@
 
 ### Real-time multiplayer Indian race game — phones as controllers, TV as the shared board.
 
-[**Play live »**](YOUR_VERCEL_URL)
+[**Play live »**](https://chowkabhara.vercel.app/)
 
 <br />
 
