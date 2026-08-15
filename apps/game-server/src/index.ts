@@ -84,9 +84,10 @@ export default {
         boardMode?: unknown;
         expectedPlayerCount?: unknown;
       } | null;
-      const boardMode: BoardMode = isBoardMode(payload?.boardMode)
-        ? payload.boardMode
-        : "7x7";
+      const boardMode: BoardMode =
+        payload !== null && isBoardMode(payload.boardMode)
+          ? payload.boardMode
+          : "7x7";
       const rawCount = payload?.expectedPlayerCount;
       const expectedPlayerCount =
         typeof rawCount === "number" &&

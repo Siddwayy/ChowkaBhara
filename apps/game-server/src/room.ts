@@ -830,7 +830,8 @@ export class RoomDurableObject implements DurableObject {
           { headers: { "Content-Type": "application/json" } },
         );
       }
-      const boardMode = isBoardMode(body?.boardMode) ? body.boardMode : "7x7";
+      const boardMode =
+        body !== null && isBoardMode(body.boardMode) ? body.boardMode : "7x7";
       const rawCount = body?.expectedPlayerCount;
       const expectedPlayerCount =
         typeof rawCount === "number" &&
