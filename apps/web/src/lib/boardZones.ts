@@ -1,8 +1,7 @@
-import { BOARD_SIZE } from "@chowka/shared";
-import type { BoardMode } from "@chowka/shared";
+import { getBoardConfig, type BoardMode } from "@chowka/shared";
 
 /** Distance from the board edge (0 = outer ring). */
-export function ringDist(r: number, c: number, boardSize: number = BOARD_SIZE): number {
+export function ringDist(r: number, c: number, boardSize: number): number {
   return Math.min(r, c, boardSize - 1 - r, boardSize - 1 - c);
 }
 
@@ -31,7 +30,7 @@ export function zoneBaseFill(
 ): string {
   if (isCenter) return ZONE_FILL.center;
   if (safe) return ZONE_FILL.safe;
-  const boardSize = boardMode === "5x5" ? 5 : 7;
+  const boardSize = getBoardConfig(boardMode).boardSize;
   const d = ringDist(r, c, boardSize);
   if (d === 0) return ZONE_FILL.outer;
   if (boardMode === "5x5") return ZONE_FILL.inner;

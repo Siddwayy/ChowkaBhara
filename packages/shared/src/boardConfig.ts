@@ -214,3 +214,8 @@ export function pathStepCoordsMode(
   }
   return out;
 }
+
+export function isSameCell(a: Coord, b: Coord): boolean {
+  return a[0] === b[0] && a[1] === b[1];
+}
+

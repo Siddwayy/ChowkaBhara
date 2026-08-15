@@ -135,14 +135,3 @@ export function generateRoomCode(random: () => number = Math.random): string {
   return code;
 }
 
-export function generatePlayerId(random: () => number = Math.random): string {
-  const bytes = new Uint8Array(16);
-  for (let i = 0; i < bytes.length; i++) {
-    bytes[i] = Math.floor(random() * 256);
-  }
-  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
-}
-
-export function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
-}

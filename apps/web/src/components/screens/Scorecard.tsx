@@ -1,6 +1,6 @@
 import { PAWNS_PER_PLAYER, type GameOverResult } from "@chowka/shared";
-import { colorTheme } from "../lib/colors";
-import { PrimaryButton, SecondaryButton } from "./ui";
+import { colorTheme } from "../../lib/colors";
+import { PrimaryButton, SecondaryButton } from "../ui";
 
 export function Scorecard({
   gameOver,

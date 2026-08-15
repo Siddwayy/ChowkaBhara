@@ -5,7 +5,7 @@ import {
   type Color,
   type Coord,
 } from "@chowka/shared";
-import { COLOR_THEME } from "../lib/colors";
+import { COLOR_THEME } from "../../lib/colors";
 
 /**
  * Thin arrow (shaft + head) in board-cell viewBox units.

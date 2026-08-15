@@ -1,13 +1,19 @@
 import { useCallback, useEffect, useState } from "react";
 import { type HostView, type ServerMessage } from "@chowka/shared";
-import { useGameSocket } from "../lib/useGameSocket";
-import { useAudio, usePhaseSound } from "../lib/useAudio";
-import { useTravelAnimation } from "../lib/useTravelAnimation";
-import { COLOR_THEME } from "../lib/colors";
-import { Board, Pockets } from "./Board";
-import { MuteButton } from "./MuteButton";
+import { useGameSocket } from "../../lib/useGameSocket";
+import { useAudio, usePhaseSound } from "../../lib/useAudio";
+import { useTravelAnimation } from "../../lib/useTravelAnimation";
+import { COLOR_THEME } from "../../lib/colors";
+import { Board, Pockets } from "../board";
 import { Scorecard } from "./Scorecard";
-import { CrewList, Instruction, PhaseCountdown, PhaseShell, ShellDice } from "./ui";
+import {
+  CrewList,
+  Instruction,
+  MuteButton,
+  PhaseCountdown,
+  PhaseShell,
+  ShellDice,
+} from "../ui";
 
 function activePlayer(view: HostView) {
   return view.players.find((p) => p.id === view.activePlayerId) ?? null;

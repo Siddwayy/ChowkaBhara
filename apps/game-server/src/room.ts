@@ -82,7 +82,10 @@ function freshPawns(): number[] {
   return Array.from({ length: PAWNS_PER_PLAYER }, () => 0);
 }
 
-function emptyRoom(code: string): RoomState {
+function emptyRoom(
+  code: string,
+  opts?: { boardMode?: BoardMode; expectedPlayerCount?: number },
+): RoomState {
   return {
     code,
     phase: "lobby",
@@ -92,8 +95,8 @@ function emptyRoom(code: string): RoomState {
     currentRoll: null,
     bonusPending: false,
     lastMove: null,
-    expectedPlayerCount: MIN_PLAYERS,
-    boardMode: "7x7",
+    expectedPlayerCount: opts?.expectedPlayerCount ?? MIN_PLAYERS,
+    boardMode: opts?.boardMode && isBoardMode(opts.boardMode) ? opts.boardMode : "7x7",
     hostPlayerId: null,
     phaseEndsAt: null,
     gameOver: null,
@@ -808,7 +811,11 @@ export class RoomDurableObject implements DurableObject {
     const url = new URL(request.url);
 
     if (url.pathname === "/internal/init" && request.method === "POST") {
-      const body = (await request.json().catch(() => null)) as { code?: string } | null;
+      const body = (await request.json().catch(() => null)) as {
+        code?: string;
+        boardMode?: unknown;
+        expectedPlayerCount?: unknown;
+      } | null;
       const code = typeof body?.code === "string" ? body.code.toUpperCase().trim() : "";
       if (!code) {
         return new Response(JSON.stringify({ error: "Missing code" }), {
@@ -823,7 +830,16 @@ export class RoomDurableObject implements DurableObject {
           { headers: { "Content-Type": "application/json" } },
         );
       }
-      this.room = emptyRoom(code);
+      const boardMode = isBoardMode(body?.boardMode) ? body.boardMode : "7x7";
+      const rawCount = body?.expectedPlayerCount;
+      const expectedPlayerCount =
+        typeof rawCount === "number" &&
+        Number.isInteger(rawCount) &&
+        rawCount >= MIN_PLAYERS &&
+        rawCount <= MAX_PLAYERS
+          ? rawCount
+          : MIN_PLAYERS;
+      this.room = emptyRoom(code, { boardMode, expectedPlayerCount });
       await this.persist();
       return new Response(JSON.stringify({ ok: true, created: true, code }), {
         headers: { "Content-Type": "application/json" },

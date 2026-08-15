@@ -1,4 +1,11 @@
-import { ROOM_CODE_LENGTH, generateRoomCode } from "@chowka/shared";
+import {
+  MAX_PLAYERS,
+  MIN_PLAYERS,
+  ROOM_CODE_LENGTH,
+  generateRoomCode,
+  isBoardMode,
+  type BoardMode,
+} from "@chowka/shared";
 import { RoomDurableObject } from "./room";
 
 export { RoomDurableObject };
@@ -73,6 +80,22 @@ export default {
     }
 
     if (url.pathname === "/api/lobby" && request.method === "POST") {
+      const payload = (await request.json().catch(() => null)) as {
+        boardMode?: unknown;
+        expectedPlayerCount?: unknown;
+      } | null;
+      const boardMode: BoardMode = isBoardMode(payload?.boardMode)
+        ? payload.boardMode
+        : "7x7";
+      const rawCount = payload?.expectedPlayerCount;
+      const expectedPlayerCount =
+        typeof rawCount === "number" &&
+        Number.isInteger(rawCount) &&
+        rawCount >= MIN_PLAYERS &&
+        rawCount <= MAX_PLAYERS
+          ? rawCount
+          : MIN_PLAYERS;
+
       // Retry a few times so a rare code collision doesn't reuse a live room.
       for (let attempt = 0; attempt < 5; attempt++) {
         const code = generateRoomCode();
@@ -82,7 +105,7 @@ export default {
           new Request("https://room/internal/init", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ code }),
+            body: JSON.stringify({ code, boardMode, expectedPlayerCount }),
           }),
         );
         if (!initRes.ok) continue;

@@ -12,9 +12,9 @@ import {
   type PawnShape,
   type PlayerPublic,
 } from "@chowka/shared";
-import { COLOR_THEME } from "../lib/colors";
-import { zoneBaseFill } from "../lib/boardZones";
-import type { TravelAnim } from "../lib/useTravelAnimation";
+import { COLOR_THEME } from "../../lib/colors";
+import { zoneBaseFill } from "../../lib/boardZones";
+import type { TravelAnim } from "../../lib/useTravelAnimation";
 import { InnerEntryArrows } from "./InnerEntryArrow";
 import { SafeHouse } from "./SafeHouse";
 

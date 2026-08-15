@@ -6,11 +6,10 @@ import {
   type BoardMode,
   type Color,
 } from "@chowka/shared";
-import { COLOR_THEME } from "../lib/colors";
-import { zoneBaseFill } from "../lib/boardZones";
-import { InnerEntryArrow } from "./InnerEntryArrow";
-import { SafeHouse } from "./SafeHouse";
-import { PrimaryButton, ShellIcon } from "./ui";
+import { COLOR_THEME } from "../../lib/colors";
+import { zoneBaseFill } from "../../lib/boardZones";
+import { InnerEntryArrow, SafeHouse } from "../board";
+import { PrimaryButton, ShellIcon } from "../ui";
 
 const GAME_LOOP = [
   {

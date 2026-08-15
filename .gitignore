@@ -5,6 +5,7 @@ dist
 .vercel
 .wrangler
 *.log
+*.tsbuildinfo
 .DS_Store
 .env
 .dev.vars

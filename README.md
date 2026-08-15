@@ -8,9 +8,31 @@ Multiplayer party version of the classic Indian cross-and-circle race game — J
 
 | Path | Package | Role |
 |------|---------|------|
-| `packages/shared` | `@chowka/shared` | Zod schemas, board paths, capture/roll logic, constants |
+| `packages/shared` | `@chowka/shared` | Zod schemas, board configs (5×5 / 7×7), capture/roll logic, constants |
 | `apps/web` | `@chowka/web` | Host TV + phone UI (Astro islands) |
 | `apps/game-server` | `@chowka/game-server` | Authoritative room state (Worker + one Durable Object per room) |
+
+### Web layout (`apps/web/src`)
+
+```
+pages/          Astro routes: /, /play, /host
+layouts/        BaseLayout
+lib/            socket, animation, audio, colors, board zone fills
+components/
+  board/        Grid, pawns, arrows, safe-house icon
+  screens/      Lobby, play, host, rules, scorecard
+  ui/           Buttons, dice, status strip, mute
+```
+
+### Shared layout (`packages/shared/src`)
+
+```
+constants.ts    Players, rolls, timeouts, room codes
+boardConfig.ts  5×5 / 7×7 paths, safes, entry jumps
+helpers.ts      Roll, move validation, rankings
+types.ts        Zod room / player views
+messages.ts     Client intents + server events
+```
 
 ## Prerequisites
 
@@ -88,7 +110,7 @@ domains to that string before pushing.
 ## Game model (server-authoritative)
 
 - One Durable Object per room code; all rules run there. Clients only send intents.
-- Board is a 7×7 grid. Each pawn's position is an integer: `-1` = base pocket, `0..48` = track index, `48` = center. Movement is `newPos = pos + roll`.
-- `packages/shared/src/paths.ts` holds the canonical spiral for Red and rotates it 90° per color, so all four share one track and captures resolve by absolute cell.
-- Safe squares (edge homes, inner-corner Xs, and center) can never be captured on and allow stacking.
+- Host picks **7×7** (49 steps) or **5×5** (25 steps). Each pawn position is an integer along that color's path; movement is `newPos = pos + roll`. Center needs an exact landing.
+- `packages/shared/src/boardConfig.ts` holds the canonical spiral for Red and rotates it 90° per color, so all four share one track and captures resolve by absolute cell.
+- Safe squares (edge homes, inner-corner houses on 7×7, and center) can never be captured on and allow stacking.
 - Phases: `lobby → roll → move → resolution → (roll | next turn) → … → endgame`, driven by Durable Object alarms with a per-turn timeout that auto-acts so an idle player never stalls the table.

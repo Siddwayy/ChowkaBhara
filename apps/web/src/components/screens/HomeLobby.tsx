@@ -5,9 +5,9 @@ import {
   ROOM_CODE_LENGTH,
   type BoardMode,
 } from "@chowka/shared";
-import { getServerHttpUrl } from "../lib/serverUrl";
-import { playSound, unlockAudio } from "../lib/sound";
-import { PrimaryButton } from "./ui";
+import { getServerHttpUrl } from "../../lib/serverUrl";
+import { playSound, unlockAudio } from "../../lib/sound";
+import { PrimaryButton } from "../ui";
 
 type Screen = "menu" | "create" | "join";
 
@@ -46,7 +46,14 @@ export function HomeLobby() {
     setError(null);
     const serverUrl = getServerHttpUrl();
     try {
-      const res = await fetch(`${serverUrl}/api/lobby`, { method: "POST" });
+      const res = await fetch(`${serverUrl}/api/lobby`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          boardMode,
+          expectedPlayerCount: maxPlayers,
+        }),
+      });
       if (!res.ok) throw new Error("Could not create lobby");
       const data = (await res.json()) as { code: string };
       const params = new URLSearchParams({

@@ -13,22 +13,22 @@ import {
   type PlayerView,
   type ServerMessage,
 } from "@chowka/shared";
-import { getOrCreatePlayerId } from "../lib/serverUrl";
-import { useGameSocket } from "../lib/useGameSocket";
-import { useAudio, usePhaseSound } from "../lib/useAudio";
-import { useTravelAnimation } from "../lib/useTravelAnimation";
-import { COLOR_THEME } from "../lib/colors";
-import { Board } from "./Board";
-import { MuteButton } from "./MuteButton";
+import { getOrCreatePlayerId } from "../../lib/serverUrl";
+import { useGameSocket } from "../../lib/useGameSocket";
+import { useAudio, usePhaseSound } from "../../lib/useAudio";
+import { useTravelAnimation } from "../../lib/useTravelAnimation";
+import { COLOR_THEME } from "../../lib/colors";
+import { Board } from "../board";
 import { acknowledgeRules, hasAcknowledgedRules, RulesScreen } from "./RulesScreen";
 import { Scorecard } from "./Scorecard";
 import {
   CrewList,
+  MuteButton,
   PhaseShell,
   PrimaryButton,
   ShellDice,
   StatusStrip,
-} from "./ui";
+} from "../ui";
 
 export function PlayScreen({
   code,
@@ -96,6 +96,8 @@ export function PlayScreen({
   });
 
   const playerView = view?.role === "player" ? view : null;
+  // URL mode (create) until the room snapshot exists — never flash the 7×7 default.
+  const rulesBoardMode = desiredBoardMode ?? playerView?.boardMode ?? null;
 
   usePhaseSound(playerView?.phase, play);
 
@@ -268,11 +270,17 @@ export function PlayScreen({
 
       {showRules ? (
         <div className="mt-4 flex min-h-0 flex-1 flex-col overflow-y-auto">
-          <RulesScreen
-            boardMode={playerView?.boardMode ?? "7x7"}
-            onDone={acceptRules}
-            onBack={rulesOk ? () => setShowRules(false) : undefined}
-          />
+          {rulesBoardMode ? (
+            <RulesScreen
+              boardMode={rulesBoardMode}
+              onDone={acceptRules}
+              onBack={rulesOk ? () => setShowRules(false) : undefined}
+            />
+          ) : (
+            <p className="mt-10 animate-pulseGlow text-center text-surface/70">
+              Linking to room…
+            </p>
+          )}
         </div>
       ) : !playerView ? (
         lastError && /already taken/i.test(lastError) ? null : (
